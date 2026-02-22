@@ -1,0 +1,226 @@
+/* ── Freesentation font-face ── */
+@font-face {
+  font-family: 'Freesentation';
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/Freesentation-1Thin.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Freesentation';
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/Freesentation-2ExtraLight.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Freesentation';
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/Freesentation-3Light.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Freesentation';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/Freesentation-4Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Freesentation';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/Freesentation-5Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Freesentation';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/Freesentation-6SemiBold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Freesentation';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/Freesentation-7Bold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Freesentation';
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/Freesentation-8ExtraBold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Freesentation';
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+  src: url('/fonts/Freesentation-9Black.ttf') format('truetype');
+}
+
+/* Reset & global dark theme */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: #0a0a0a;
+  color: #e0e0e0;
+  font-family: 'Freesentation', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #141414;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* AntD dark overrides */
+.ant-layout {
+  background: #0a0a0a !important;
+}
+
+.ant-card {
+  background: #1a1a1a !important;
+  border-color: #303030 !important;
+}
+
+.ant-table {
+  background: transparent !important;
+}
+
+/* Heartbeat pulse animation */
+@keyframes heartbeat-pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  50% {
+    transform: scale(1.4);
+    box-shadow: 0 0 8px 2px currentColor;
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 currentColor;
+  }
+}
+
+.heartbeat-dot {
+  transition: background 0.3s ease;
+}
+
+.heartbeat-active {
+  color: #52c41a;
+  animation: heartbeat-pulse 2s ease-in-out infinite;
+}
+
+.heartbeat-warning {
+  color: #faad14;
+  animation: heartbeat-pulse 1.2s ease-in-out infinite;
+}
+
+.heartbeat-error {
+  color: #ff4d4f;
+  /* No animation — solid red */
+}
+
+/* ── Table dark theme polish ── */
+.ant-table-tbody > tr:hover > td {
+  background: #252525 !important;
+}
+
+.ant-table-thead > tr > th,
+.ant-table-thead > tr > td {
+  background: #1a1a1a !important;
+  border-bottom: 1px solid #303030 !important;
+  color: #999 !important;
+  font-weight: 500 !important;
+  font-size: 12px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+}
+
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid #1f1f1f !important;
+}
+
+.ant-table-tbody > tr:nth-child(even) > td {
+  background: #161616 !important;
+}
+
+/* ── Held coin row highlight ── */
+.held-row td {
+  background: rgba(22, 104, 220, 0.08) !important;
+}
+
+.ant-statistic-title {
+  color: #888 !important;
+  font-size: 12px !important;
+}
+
+/* ── Card / Layout dark polish ── */
+.ant-card-head {
+  border-bottom: 1px solid #252525 !important;
+}
+
+.ant-card-head-title {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #d0d0d0 !important;
+}
+
+.ant-descriptions-bordered .ant-descriptions-item-label {
+  background: #1a1a1a !important;
+  color: #888 !important;
+}
+
+.ant-descriptions-bordered .ant-descriptions-item-content {
+  background: #141414 !important;
+  color: #d0d0d0 !important;
+}
+
+.ant-tabs-tab {
+  color: #888 !important;
+}
+
+.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #1668dc !important;
+}
+
+.ant-divider {
+  border-color: #252525 !important;
+}
+
+.ant-badge .ant-badge-count {
+  font-size: 11px !important;
+}
+
+.ant-empty-description {
+  color: #666 !important;
+}

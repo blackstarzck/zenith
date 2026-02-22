@@ -1,0 +1,270 @@
+"""
+Supabase 스토리지 모듈.
+매매 이력, 일별 통계, 시스템 로그, 봇 상태, 가격 스냅샷을 Supabase(PostgreSQL)에 저장합니다.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timedelta
+from typing import Any
+
+from supabase import create_client, Client
+
+from src.config import SupabaseConfig
+
+logger = logging.getLogger(__name__)
+
+
+class StorageClient:
+    """Supabase DB 클라이언트 — 동기 방식."""
+
+    def __init__(self, config: SupabaseConfig) -> None:
+        if not config.url or not config.secret_key:
+            raise ValueError("SUPABASE_URL 및 SUPABASE_SECRET_KEY가 필요합니다.")
+        self._client: Client = create_client(config.url, config.secret_key)
+
+    # ── trades ───────────────────────────────────────────────
+
+    def insert_trade(
+        self,
+        symbol: str,
+        side: str,
+        price: float,
+        volume: float,
+        amount: float,
+        fee: float,
+        pnl: float | None = None,
+        remaining_volume: float | None = None,
+    ) -> dict[str, Any]:
+        """매매 체결 내역을 기록합니다."""
+        row = {
+            "symbol": symbol,
+            "side": side,
+            "price": price,
+            "volume": volume,
+            "amount": amount,
+            "fee": fee,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        if pnl is not None:
+            row["pnl"] = pnl
+        if remaining_volume is not None:
+            row["remaining_volume"] = remaining_volume
+
+        result = self._client.table("trades").insert(row).execute()
+        logger.info("Trade recorded: %s %s @ %s", side, symbol, price)
+        return result.data[0] if result.data else {}
+
+    def get_trades(
+        self,
+        symbol: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """최근 매매 이력을 조회합니다."""
+        query = self._client.table("trades").select("*").order("created_at", desc=True).limit(limit)
+        if symbol:
+            query = query.eq("symbol", symbol)
+        result = query.execute()
+        return result.data or []
+
+    # ── daily_stats ──────────────────────────────────────────
+
+    def upsert_daily_stats(
+        self,
+        stats_date: date,
+        total_balance: float,
+        net_profit: float,
+        drawdown: float,
+    ) -> dict[str, Any]:
+        """일별 성과 지표를 갱신합니다 (upsert)."""
+        row = {
+            "stats_date": stats_date.isoformat(),
+            "total_balance": total_balance,
+            "net_profit": net_profit,
+            "drawdown": drawdown,
+        }
+        result = (
+            self._client.table("daily_stats")
+            .upsert(row, on_conflict="stats_date")
+            .execute()
+        )
+        logger.info("Daily stats upserted for %s", stats_date)
+        return result.data[0] if result.data else {}
+
+    def get_daily_stats(self, days: int = 30) -> list[dict[str, Any]]:
+        """최근 N일간 성과 지표를 조회합니다."""
+        result = (
+            self._client.table("daily_stats")
+            .select("*")
+            .order("stats_date", desc=True)
+            .limit(days)
+            .execute()
+        )
+        return result.data or []
+
+    # ── balance_snapshots ────────────────────────────────────
+
+    def insert_balance_snapshot(self, total_balance: float) -> None:
+        """시간단위 자산 스냅샷을 저장합니다."""
+        row = {
+            "total_balance": total_balance,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        try:
+            self._client.table("balance_snapshots").insert(row).execute()
+        except Exception:
+            logger.exception("Failed to insert balance snapshot")
+
+    def cleanup_old_balance_snapshots(self, days: int = 7) -> None:
+        """N일 이전의 자산 스냅샷을 삭제합니다."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        try:
+            self._client.table("balance_snapshots").delete().lt("created_at", cutoff).execute()
+        except Exception:
+            logger.exception("Failed to cleanup old balance snapshots")
+    # ── system_logs ──────────────────────────────────────────
+
+    def insert_log(self, level: str, message: str) -> None:
+        """시스템 로그를 기록합니다."""
+        row = {
+            "level": level,
+            "message": message,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        try:
+            self._client.table("system_logs").insert(row).execute()
+        except Exception:
+            # 로그 저장 실패가 시스템 전체를 중단시키면 안 됨
+            logger.exception("Failed to insert system log")
+
+    def get_recent_logs(self, limit: int = 20) -> list[dict[str, Any]]:
+        """최근 시스템 로그를 조회합니다."""
+        result = (
+            self._client.table("system_logs")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+
+    # ── bot_state (단일 행) ───────────────────────────────────
+
+    def upsert_bot_state(
+        self,
+        *,
+        initial_balance: float | None = None,
+        current_balance: float | None = None,
+        krw_balance: float | None = None,
+        top_symbols: list[str] | None = None,
+    ) -> None:
+        """봇 실시간 상태를 갱신합니다 (단일 행 upsert).
+
+        전달된 필드만 업데이트합니다.
+        """
+        row: dict[str, Any] = {
+            "id": 1,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        if initial_balance is not None:
+            row["initial_balance"] = initial_balance
+        if current_balance is not None:
+            row["current_balance"] = current_balance
+        if krw_balance is not None:
+            row["krw_balance"] = krw_balance
+        if top_symbols is not None:
+            row["top_symbols"] = top_symbols
+        try:
+            self._client.table("bot_state").upsert(
+                row, on_conflict="id"
+            ).execute()
+        except Exception:
+            logger.exception("봇 상태 저장 실패")
+
+    def get_bot_state(self) -> dict[str, Any] | None:
+        """현재 봇 상태를 조회합니다."""
+        try:
+            result = (
+                self._client.table("bot_state")
+                .select("*")
+                .eq("id", 1)
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception:
+            logger.exception("봇 상태 조회 실패")
+            return None
+
+    # ── kakao_tokens ─────────────────────────────────────────
+
+    def get_kakao_tokens(self) -> dict[str, Any] | None:
+        """저장된 카카오 토큰을 조회합니다."""
+        try:
+            result = (
+                self._client.table("kakao_tokens")
+                .select("*")
+                .eq("id", 1)
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception:
+            logger.exception("카카오 토큰 조회 실패")
+            return None
+
+    def upsert_kakao_tokens(
+        self,
+        access_token: str,
+        refresh_token: str,
+    ) -> None:
+        """카카오 토큰을 저장/갱신합니다."""
+        row = {
+            "id": 1,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        try:
+            self._client.table("kakao_tokens").upsert(
+                row, on_conflict="id"
+            ).execute()
+            logger.info("카카오 토큰 갱신 저장 완료")
+        except Exception:
+            logger.exception("카카오 토큰 저장 실패")
+
+    # ── price_snapshots ──────────────────────────────────────
+
+    def insert_price_snapshot(
+        self,
+        symbol: str,
+        price: float,
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
+    ) -> None:
+        """가격 스냅샷을 기록합니다 (차트 시각화용)."""
+        row: dict[str, Any] = {
+            "symbol": symbol,
+            "price": price,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        if stop_loss is not None:
+            row["stop_loss"] = stop_loss
+        if take_profit is not None:
+            row["take_profit"] = take_profit
+        try:
+            self._client.table("price_snapshots").insert(row).execute()
+        except Exception:
+            logger.exception("가격 스냅샷 저장 실패: %s", symbol)
+
+    def cleanup_old_snapshots(self, days: int = 7) -> None:
+        """오래된 가격 스냅샷을 정리합니다."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        try:
+            self._client.table("price_snapshots").delete().lt(
+                "created_at", cutoff
+            ).execute()
+            logger.info("price_snapshots %d일 이전 데이터 정리 완료", days)
+        except Exception:
+            logger.exception("가격 스냅샷 정리 실패")
