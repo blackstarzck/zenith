@@ -36,6 +36,7 @@ class StorageClient:
         fee: float,
         pnl: float | None = None,
         remaining_volume: float | None = None,
+        reason: str | None = None,
     ) -> dict[str, Any]:
         """매매 체결 내역을 기록합니다."""
         row = {
@@ -51,6 +52,8 @@ class StorageClient:
             row["pnl"] = pnl
         if remaining_volume is not None:
             row["remaining_volume"] = remaining_volume
+        if reason is not None:
+            row["reason"] = reason
 
         result = self._client.table("trades").insert(row).execute()
         logger.info("Trade recorded: %s %s @ %s", side, symbol, price)
@@ -158,7 +161,7 @@ class StorageClient:
         current_balance: float | None = None,
         krw_balance: float | None = None,
         top_symbols: list[str] | None = None,
-        symbol_volatilities: dict[str, float] | None = None,
+        symbol_volatilities: dict[str, dict] | None = None,
         is_active: bool | None = None,
         upbit_status: str | None = None,
         kakao_status: str | None = None,
@@ -280,3 +283,67 @@ class StorageClient:
             logger.info("price_snapshots %d일 이전 데이터 정리 완료", days)
         except Exception:
             logger.exception("가격 스냅샷 정리 실패")
+    # ── daily_reports ─────────────────────────────────────────
+
+    def upsert_daily_report(
+        self,
+        report_date: "date",
+        content: str,
+        total_balance: float = 0.0,
+        net_profit: float = 0.0,
+        trade_count: int = 0,
+        win_count: int = 0,
+        loss_count: int = 0,
+    ) -> dict[str, Any]:
+        """일일 분석 리포트를 저장/갱신합니다 (upsert)."""
+        row = {
+            "report_date": report_date.isoformat(),
+            "content": content,
+            "total_balance": total_balance,
+            "net_profit": net_profit,
+            "trade_count": trade_count,
+            "win_count": win_count,
+            "loss_count": loss_count,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        try:
+            result = (
+                self._client.table("daily_reports")
+                .upsert(row, on_conflict="report_date")
+                .execute()
+            )
+            logger.info("일일 리포트 저장 완료: %s", report_date)
+            return result.data[0] if result.data else {}
+        except Exception:
+            logger.exception("일일 리포트 저장 실패: %s", report_date)
+            return {}
+
+    def get_daily_reports(self, limit: int = 30) -> list[dict[str, Any]]:
+        """최근 일일 리포트 목록을 조회합니다."""
+        try:
+            result = (
+                self._client.table("daily_reports")
+                .select("id, report_date, total_balance, net_profit, trade_count, win_count, loss_count, created_at")
+                .order("report_date", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception:
+            logger.exception("일일 리포트 목록 조회 실패")
+            return []
+
+    def get_daily_report(self, report_date: "date") -> dict[str, Any] | None:
+        """특정 날짜의 일일 리포트(본문 포함)를 조회합니다."""
+        try:
+            result = (
+                self._client.table("daily_reports")
+                .select("*")
+                .eq("report_date", report_date.isoformat())
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception:
+            logger.exception("일일 리포트 조회 실패: %s", report_date)
+            return None

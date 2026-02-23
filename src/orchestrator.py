@@ -9,16 +9,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import date
+from datetime import date, datetime
 
 from src.config import AppConfig
 from src.collector.data_collector import UpbitCollector
-from src.strategy.indicators import compute_snapshot
+from src.strategy.indicators import compute_snapshot, calc_ma_trend, calc_rsi_slope, calc_bb_status
 from src.strategy.engine import MeanReversionEngine, Signal
 from src.executor.order_executor import OrderExecutor
 from src.risk.manager import RiskManager
 from src.storage.client import StorageClient
 from src.notifier.kakao import KakaoNotifier
+from src.report.generator import generate_daily_report
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ class Orchestrator:
         self._running = False
         self._loop_count = 0
         self._today: date = date.today()
+        self._daily_report_sent: bool = False  # 당일 08:00 리포트 발송 여부
 
     # ── 메인 루프 ────────────────────────────────────────────
 
@@ -86,6 +88,7 @@ class Orchestrator:
             return
 
         self._running = True
+        self._storage.upsert_bot_state(is_active=True)
 
         while self._running:
             try:
@@ -100,11 +103,13 @@ class Orchestrator:
             if self._running:
                 time.sleep(self._config.loop_interval_sec)
 
+        self._storage.upsert_bot_state(is_active=False)
         logger.info("=== Zenith 트레이딩 봇 종료 ===")
 
     def stop(self) -> None:
         """봇을 안전하게 중지합니다."""
         self._running = False
+        self._storage.upsert_bot_state(is_active=False)
 
     # ── 단일 틱 (1회 루프) ───────────────────────────────────
 
@@ -163,9 +168,10 @@ class Orchestrator:
             except Exception as e:
                 logger.error("잔고 스냅샷 저장 실패: %s", e)
 
-        # 5. 주기적 일일 리포트 (매 시간)
-        if self._loop_count % 360 == 0:
+        # 5. 일일 리포트 (매일 08:00 1회 발송)
+        if not self._daily_report_sent and datetime.now().hour >= 8:
             self._send_daily_report()
+            self._daily_report_sent = True
 
     # ── 청산 평가 ────────────────────────────────────────────
 
@@ -218,7 +224,7 @@ class Orchestrator:
         krw = self._collector.get_krw_balance()
         self._storage.upsert_bot_state(current_balance=current_balance, krw_balance=krw)
 
-        volatilities: dict[str, float] = {}
+        symbol_indicators: dict[str, dict] = {}
 
         for symbol in self._target_symbols:
             try:
@@ -238,8 +244,39 @@ class Orchestrator:
                     atr_period=self._config.strategy.atr_period,
                 )
 
-                # 변동성 비율 수집 (프론트엔드 표시용)
-                volatilities[symbol] = round(snapshot.volatility_ratio, 2)
+                closes = df["close"]
+
+                # ── 프론트엔드 표시용: 4가지 진입 게이트 지표 수집 ──
+                # 1) 변동성 비율
+                vol = round(snapshot.volatility_ratio, 2)
+
+                # 2) 추세 (MA20 > MA50)
+                trend = calc_ma_trend(closes, short_period=20, long_period=50)
+                # True/False/None → "up"/"down"/"unknown"
+                trend_str = "up" if trend is True else ("down" if trend is False else "unknown")
+
+                # 3) BB 이탈 상태 — 캔들 데이터에서 직접 계산 (stateless)
+                bb_str = calc_bb_status(
+                    closes,
+                    bb_period=self._config.strategy.bb_period,
+                    bb_std_dev=self._config.strategy.bb_std_dev,
+                    lookback=20,
+                )
+
+                # 4) RSI 값 + 기울기
+                rsi_val = round(snapshot.rsi, 1)
+                rsi_slope = round(
+                    calc_rsi_slope(closes, self._config.strategy.rsi_period, lookback=3),
+                    2,
+                )
+
+                symbol_indicators[symbol] = {
+                    "vol": vol,
+                    "trend": trend_str,
+                    "bb": bb_str,
+                    "rsi": rsi_val,
+                    "rsi_slope": rsi_slope,
+                }
 
                 # 체결 실패 쿨다운 확인
                 if self._executor.is_on_cooldown(symbol):
@@ -252,7 +289,7 @@ class Orchestrator:
                     continue
 
                 signal = self._strategy.evaluate_entry(
-                    symbol, snapshot, df["close"],
+                    symbol, snapshot, closes,
                 )
 
                 if signal.signal == Signal.BUY:
@@ -265,9 +302,9 @@ class Orchestrator:
             except Exception as e:
                 logger.error("진입 평가 오류 [%s]: %s", symbol, e)
 
-        # 변동성 데이터를 bot_state에 저장
-        if volatilities:
-            self._storage.upsert_bot_state(symbol_volatilities=volatilities)
+        # 지표 데이터를 bot_state에 저장
+        if symbol_indicators:
+            self._storage.upsert_bot_state(symbol_volatilities=symbol_indicators)
 
     # ── 가격 스냅샷 저장 ─────────────────────────────────────
 
@@ -348,6 +385,7 @@ class Orchestrator:
             volume=result.volume,
             amount=result.amount,
             fee=result.fee,
+            reason=signal.reason,
         )
 
     def _execute_sell_half(self, symbol: str, pos, reason: str) -> None:
@@ -407,6 +445,7 @@ class Orchestrator:
             amount=result.amount, fee=result.fee,
             pnl=pnl,
             remaining_volume=remaining if remaining > 0 else None,
+            reason=reason,
         )
 
         asyncio.run(
@@ -443,6 +482,7 @@ class Orchestrator:
             amount=result.amount, fee=result.fee,
             pnl=pnl,
             remaining_volume=0.0,
+            reason=reason,
         )
 
         asyncio.run(
@@ -494,6 +534,7 @@ class Orchestrator:
                     volume=balance,
                     amount=amount,
                     fee=0.0,
+                    reason="포지션 동기화 (봇 재시작)",
                 )
             synced += 1
             logger.info(
@@ -553,22 +594,47 @@ class Orchestrator:
         return total
 
     def _check_daily_reset(self) -> None:
-        """날짜가 바뀌면 일일 상태를 갱신합니다."""
+        """날짜가 바뀌면 전일 stats를 확정하고 새 거래일을 초기화합니다."""
         today = date.today()
         if today != self._today:
-            self._today = today
-            # 전일 일일 통계 저장
             try:
                 balance = self._get_total_balance_krw()
+
+                # 1) 전일 최종 stats 확정 (self._today는 아직 어제)
                 self._storage.upsert_daily_stats(
                     stats_date=self._today,
                     total_balance=balance,
                     net_profit=self._risk.daily_realized_pnl,
                     drawdown=0.0,  # TODO: MDD 계산 추가
                 )
-                self._risk.update_initial_balance(balance)
+
+                # 1-1) 일일 분석 리포트 생성 (날짜 전환 전에 실행)
+                try:
+                    generate_daily_report(
+                        storage=self._storage,
+                        report_date=self._today,
+                        total_balance=balance,
+                        net_profit=self._risk.daily_realized_pnl,
+                        initial_balance=self._risk._initial_balance,
+                    )
+                    logger.info("일일 분석 리포트 생성 완료: %s", self._today)
+                except Exception as e:
+                    logger.error("일일 분석 리포트 생성 실패: %s", e)
+
+                # 2) 날짜 전환 + 리스크 매니저 리셋 (PnL 0, 초기 잔고 갱신)
+                self._today = today
+                self._risk.reset_daily(balance)
+                self._daily_report_sent = False
+
+                # 3) 금일 stats 초기 행 삽입 (net_profit=0)
+                self._storage.upsert_daily_stats(
+                    stats_date=self._today,
+                    total_balance=balance,
+                    net_profit=0.0,
+                    drawdown=0.0,
+                )
             except Exception as e:
-                logger.error("일일 통계 저장 실패: %s", e)
+                logger.error("일일 통계 저장/리셋 실패: %s", e)
 
             # 오래된 가격 스냅샷 정리 (7일 초과)
             try:

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Trade, DailyStat, SystemLog, BotState, PriceSnapshot, BalanceSnapshot, HeldPosition } from '../types/database';
+import type { Trade, DailyStat, SystemLog, BotState, PriceSnapshot, BalanceSnapshot, HeldPosition, DailyReport } from '../types/database';
 import dayjs from 'dayjs';
 
 /* ── Trades ─────────────────────────────────────────────── */
@@ -394,4 +394,66 @@ export function useLatestSnapshots(heldSymbols: string[]) {
   }, [fetch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { snapshots, loading };
+}
+
+
+/* ── Daily Reports (일일 분석 리포트) ─────────────────── */
+
+export function useDailyReports(limit = 30) {
+  const [reports, setReports] = useState<DailyReport[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('daily_reports')
+      .select('id, report_date, total_balance, net_profit, trade_count, win_count, loss_count, created_at')
+      .order('report_date', { ascending: false })
+      .limit(limit);
+    setReports((data as DailyReport[]) ?? []);
+    setLoading(false);
+  }, [limit]);
+
+  useEffect(() => {
+    fetch();
+
+    const channel = supabase
+      .channel('daily-reports-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'daily_reports' },
+        () => { fetch(); },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetch]);
+
+  return { reports, loading, refetch: fetch };
+}
+
+export function useDailyReport(reportDate: string | null) {
+  const [report, setReport] = useState<DailyReport | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!reportDate) {
+      setReport(null);
+      return;
+    }
+    (async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from('daily_reports')
+        .select('*')
+        .eq('report_date', reportDate)
+        .single();
+      setReport((data as DailyReport) ?? null);
+      setLoading(false);
+    })();
+  }, [reportDate]);
+
+  return { report, loading };
 }

@@ -16,6 +16,7 @@ import {
   LeftOutlined,
   RightOutlined,
   InfoCircleOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,6 +33,7 @@ const menuItems = [
   { key: '/trading', icon: <SwapOutlined />, label: 'Trading' },
   { key: '/analytics', icon: <BarChartOutlined />, label: 'Analytics' },
   { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
+  { key: '/reports', icon: <FileTextOutlined />, label: 'Reports' },
 ];
 
 type BotStatus = 'online' | 'warning' | 'error';

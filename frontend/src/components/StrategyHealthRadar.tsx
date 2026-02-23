@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Radar } from '@ant-design/charts';
 import { Card, Typography } from 'antd';
 
@@ -23,7 +24,7 @@ const defaultData: StrategyHealthData = {
   momentum: 50,
 };
 
-export default function StrategyHealthRadar({ data = defaultData }: Props) {
+export default memo(function StrategyHealthRadar({ data = defaultData }: Props) {
   const chartData = [
     { indicator: 'RSI', value: data.rsi },
     { indicator: 'BB 위치', value: data.bbPosition },
@@ -115,4 +116,4 @@ export default function StrategyHealthRadar({ data = defaultData }: Props) {
       <Radar {...config} />
     </Card>
   );
-}
+});

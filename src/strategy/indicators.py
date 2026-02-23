@@ -217,6 +217,62 @@ def calc_rsi_slope(closes: pd.Series, period: int = 14, lookback: int = 3) -> fl
     return float(slope)
 
 
+def calc_bb_status(
+    closes: pd.Series,
+    bb_period: int = 20,
+    bb_std_dev: float = 2.0,
+    lookback: int = 20,
+) -> str:
+    """캔들 데이터에서 BB 하단 이탈/복귀 상태를 직접 판별합니다.
+
+    인메모리 상태(_was_below_lower)에 의존하지 않고,
+    최근 lookback 캔들을 역순 스캔하여 BB 하단 이탈 이력을 확인합니다.
+
+    Args:
+        closes: 종가 시리즈
+        bb_period: 볼린저 밴드 기간
+        bb_std_dev: 볼린저 밴드 표준편차 배수
+        lookback: 이탈 이력 검색 범위 (최근 N개 캔들)
+
+    Returns:
+        "below"     — 현재 가격이 BB 하단 아래
+        "recovered" — 최근 lookback 캔들 내에서 하단 이탈 후 복귀 완료
+        "none"      — 이탈 이력 없음
+    """
+    min_required = bb_period + lookback
+    if len(closes) < min_required:
+        return "none"
+
+    current_price = float(closes.iloc[-1])
+
+    # 현재 BB 하단
+    sma_now = closes.rolling(window=bb_period).mean().iloc[-1]
+    std_now = closes.rolling(window=bb_period).std().iloc[-1]
+    lower_now = float(sma_now - bb_std_dev * std_now)
+
+    # 현재 가격이 BB 하단 아래면 → "below"
+    if current_price < lower_now:
+        return "below"
+
+    # 최근 lookback 캔들에서 BB 하단 이탈 이력 확인
+    # 각 캔들 시점의 BB lower를 rolling으로 한번에 계산
+    sma_series = closes.rolling(window=bb_period).mean()
+    std_series = closes.rolling(window=bb_period).std()
+    lower_series = sma_series - bb_std_dev * std_series
+
+    # 최근 lookback 캔들 (현재 캔들 제외)에서 종가가 BB 하단 아래였던 적이 있는지
+    for i in range(2, lookback + 1):
+        idx = len(closes) - i
+        if idx < bb_period:
+            break
+        close_val = float(closes.iloc[idx])
+        lower_val = float(lower_series.iloc[idx])
+        if close_val < lower_val:
+            return "recovered"
+
+    return "none"
+
+
 def compute_snapshot(
     df: pd.DataFrame,
     bb_period: int = 20,

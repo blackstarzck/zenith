@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage';
 import TradingPage from './pages/TradingPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import SettingsPage from './pages/SettingsPage';
+import ReportsPage from './pages/ReportsPage';
 import LoginPage from './pages/LoginPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import type { ReactNode } from 'react';
@@ -57,6 +58,7 @@ export default function App() {
               <Route path="trading" element={<TradingPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="settings" element={<SettingsPage />} />
+              <Route path="reports" element={<ReportsPage />} />
             </Route>
 
             {/* Fallback */}

@@ -160,3 +160,14 @@ class RiskManager:
     def update_initial_balance(self, balance: float) -> None:
         """당일 시작 자산을 갱신합니다 (새 거래일 시작 시 호출)."""
         self._initial_balance = balance
+
+    def reset_daily(self, new_initial_balance: float) -> None:
+        """새 거래일 시작 시 일일 카운터를 초기화하고 시작 자산을 갱신합니다.
+
+        Orchestrator._check_daily_reset()에서 전일 stats 확정 후 호출됩니다.
+        """
+        logger.info("새 거래일 시작. 일일 카운터 초기화.")
+        self._today = date.today()
+        self._daily_realized_pnl = 0.0
+        self._is_daily_stopped = False
+        self._initial_balance = new_initial_balance

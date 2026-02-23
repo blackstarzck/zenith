@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { memo, useEffect, useRef, useCallback } from 'react';
 import {
   createChart,
   LineSeries,
@@ -32,7 +32,7 @@ interface Props {
 
 /* ── Component ─────────────────────────────────────────── */
 
-export default function StopLossChart({ symbol, data, loading }: Props) {
+export default memo(function StopLossChart({ symbol, data, loading }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -319,4 +319,4 @@ export default function StopLossChart({ symbol, data, loading }: Props) {
       </div>
     </Card>
   );
-}
+});

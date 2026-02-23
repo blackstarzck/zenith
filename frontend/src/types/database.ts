@@ -10,6 +10,7 @@ export interface Trade {
   fee: number;
   pnl: number | null;
   remaining_volume: number | null;
+  reason: string | null;
   created_at: string;
 }
 
@@ -30,13 +31,22 @@ export interface SystemLog {
 export type UpbitStatus = 'connected' | 'auth_failed' | 'rate_limited' | 'error' | 'unknown';
 export type KakaoStatus = 'connected' | 'token_expired' | 'send_failed' | 'no_token' | 'unknown';
 
+/** 종목별 진입 게이트 지표 (backend에서 10초마다 갱신) */
+export interface SymbolIndicators {
+  vol: number;           // 변동성 비율 (< 2.0이면 통과)
+  trend: 'up' | 'down' | 'unknown';  // MA20 vs MA50
+  bb: 'none' | 'below' | 'recovered'; // BB 하단 이탈 상태
+  rsi: number;           // RSI 값 (0~100)
+  rsi_slope: number;     // RSI 기울기 (양수=상승전환)
+}
+
 export interface BotState {
   id: number;
   initial_balance: number;
   current_balance: number;
   krw_balance: number;
   top_symbols: string[];
-  symbol_volatilities: Record<string, number>;
+  symbol_volatilities: Record<string, SymbolIndicators>;
   is_active: boolean;
   upbit_status: UpbitStatus;
   kakao_status: KakaoStatus;
@@ -64,5 +74,18 @@ export interface HeldPosition {
   entry_price: number;
   volume: number;
   amount: number;
+  created_at: string;
+}
+
+
+export interface DailyReport {
+  id: number;
+  report_date: string;
+  content: string;
+  total_balance: number;
+  net_profit: number;
+  trade_count: number;
+  win_count: number;
+  loss_count: number;
   created_at: string;
 }

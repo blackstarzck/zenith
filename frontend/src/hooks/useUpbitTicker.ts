@@ -2,6 +2,9 @@
  * 업비트 WebSocket 실시간 시세 훅.
  * wss://api.upbit.com/websocket/v1 에 접속하여
  * 지정 종목의 현재가를 실시간으로 수신합니다.
+ *
+ * 성능 최적화: 매 틱마다 setState 하지 않고 버퍼에 누적 후
+ * FLUSH_INTERVAL(500ms)마다 배치로 state를 갱신합니다.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -23,6 +26,8 @@ export interface TickerData {
 
 const WS_URL = 'wss://api.upbit.com/websocket/v1';
 const RECONNECT_DELAY = 3_000;
+/** 배치 플러시 간격 (ms). 이 주기마다 버퍼를 state에 반영합니다. */
+const FLUSH_INTERVAL = 500;
 
 /**
  * 업비트 WebSocket 실시간 시세를 구독합니다.
@@ -33,7 +38,29 @@ export function useUpbitTicker(symbols: string[]) {
   const [tickers, setTickers] = useState<Map<string, TickerData>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const bufferRef = useRef<Map<string, TickerData>>(new Map());
+  const flushTimer = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const symbolsKey = symbols.join(',');
+
+  // 주기적으로 버퍼를 state에 플러시
+  useEffect(() => {
+    flushTimer.current = setInterval(() => {
+      if (bufferRef.current.size === 0) return;
+      const buffered = bufferRef.current;
+      bufferRef.current = new Map();
+      setTickers((prev) => {
+        const next = new Map(prev);
+        for (const [code, ticker] of buffered) {
+          next.set(code, ticker);
+        }
+        return next;
+      });
+    }, FLUSH_INTERVAL);
+
+    return () => {
+      clearInterval(flushTimer.current);
+    };
+  }, []);
 
   const connect = useCallback(() => {
     if (symbols.length === 0) return;
@@ -77,11 +104,8 @@ export function useUpbitTicker(symbols: string[]) {
           timestamp: data.timestamp,
         };
 
-        setTickers((prev) => {
-          const next = new Map(prev);
-          next.set(data.code as string, ticker);
-          return next;
-        });
+        // 버퍼에 누적 (setState 호출 없음 → 리렌더 없음)
+        bufferRef.current.set(data.code as string, ticker);
       } catch {
         // 파싱 실패 무시
       }
@@ -102,6 +126,7 @@ export function useUpbitTicker(symbols: string[]) {
 
     return () => {
       clearTimeout(reconnectTimer.current);
+      // flushTimer는 Effect 1(deps=[])이 관리 — 여기서 정리하지 않음
       if (wsRef.current) {
         wsRef.current.onclose = null;
         wsRef.current.close();

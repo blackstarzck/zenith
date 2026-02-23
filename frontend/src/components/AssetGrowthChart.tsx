@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { memo, useEffect, useRef, useCallback } from 'react';
 import {
   createChart,
   AreaSeries,
@@ -83,7 +83,7 @@ function formatTooltipDate(time: number, range: ChartRange): string {
 
 /* ── Component ─────────────────────────────────────────── */
 
-export default function AssetGrowthChart({ data, height = 340, chartRange = 30 }: Props) {
+export default memo(function AssetGrowthChart({ data, height = 340, chartRange = 30 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Area'> | null>(null);
@@ -262,4 +262,4 @@ export default function AssetGrowthChart({ data, height = 340, chartRange = 30 }
       />
     </div>
   );
-}
+});
