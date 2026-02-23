@@ -3,6 +3,7 @@ import {
   createChart,
   LineSeries,
   CrosshairMode,
+  ColorType,
   LineStyle,
   type IChartApi,
   type ISeriesApi,
@@ -50,7 +51,7 @@ export default function StopLossChart({ symbol, data, loading }: Props) {
       height: 280,
       autoSize: true,
       layout: {
-        background: { type: 'solid' as const, color: '#141414' },
+        background: { type: ColorType.Solid, color: '#141414' },
         textColor: 'rgba(255,255,255,0.5)',
         fontSize: 11,
       },

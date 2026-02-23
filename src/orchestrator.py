@@ -218,16 +218,9 @@ class Orchestrator:
         krw = self._collector.get_krw_balance()
         self._storage.upsert_bot_state(current_balance=current_balance, krw_balance=krw)
 
+        volatilities: dict[str, float] = {}
+
         for symbol in self._target_symbols:
-            # 체결 실패 쿨다운 확인
-            if self._executor.is_on_cooldown(symbol):
-                continue
-
-            can_enter, reason = self._risk.can_enter(symbol, current_balance)
-            if not can_enter:
-                continue
-
-
             try:
                 df = self._collector.get_ohlcv(
                     symbol,
@@ -245,6 +238,19 @@ class Orchestrator:
                     atr_period=self._config.strategy.atr_period,
                 )
 
+                # 변동성 비율 수집 (프론트엔드 표시용)
+                volatilities[symbol] = round(snapshot.volatility_ratio, 2)
+
+                # 체결 실패 쿨다운 확인
+                if self._executor.is_on_cooldown(symbol):
+                    time.sleep(0.2)
+                    continue
+
+                can_enter, reason = self._risk.can_enter(symbol, current_balance)
+                if not can_enter:
+                    time.sleep(0.2)
+                    continue
+
                 signal = self._strategy.evaluate_entry(
                     symbol, snapshot, df["close"],
                 )
@@ -258,6 +264,10 @@ class Orchestrator:
 
             except Exception as e:
                 logger.error("진입 평가 오류 [%s]: %s", symbol, e)
+
+        # 변동성 데이터를 bot_state에 저장
+        if volatilities:
+            self._storage.upsert_bot_state(symbol_volatilities=volatilities)
 
     # ── 가격 스냅샷 저장 ─────────────────────────────────────
 

@@ -120,7 +120,7 @@ export default function TradingPage() {
   const buyTrades = trades.filter((t) => t.side === 'bid');
   const sellSymbols = new Set(trades.filter((t) => t.side === 'ask').map((t) => t.symbol));
   const activePositions = buyTrades.filter((t) => !sellSymbols.has(t.symbol));
-  const pendingOrders = buyTrades.filter((t) => sellSymbols.has(t.symbol));
+  void buyTrades.filter((t) => sellSymbols.has(t.symbol));
 
   const handleEmergencySell = (trade: Trade) => {
     setSelectedPosition({

@@ -61,7 +61,7 @@ export default function SettingsPage() {
       </Title>
 
       <Alert
-        message="주의: 설정 변경은 봇 재시작 후 반영됩니다."
+        title="주의: 설정 변경은 봇 재시작 후 반영됩니다."
         type="warning"
         showIcon
         banner

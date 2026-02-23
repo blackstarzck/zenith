@@ -3,6 +3,7 @@ import {
   createChart,
   AreaSeries,
   CrosshairMode,
+  ColorType,
   type IChartApi,
   type ISeriesApi,
   type AreaData,
@@ -96,7 +97,7 @@ export default function AssetGrowthChart({ data, height = 340, chartRange = 30 }
       height,
       autoSize: true,
       layout: {
-        background: { type: 'solid' as const, color: '#141414' },
+        background: { type: ColorType.Solid, color: '#141414' },
         textColor: 'rgba(255,255,255,0.5)',
         fontSize: 12,
       },

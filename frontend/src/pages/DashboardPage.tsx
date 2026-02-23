@@ -12,6 +12,7 @@ import {
   Spin,
   Empty,
   Segmented,
+  Tooltip,
 } from 'antd';
 import {
   ArrowUpOutlined,
@@ -21,6 +22,7 @@ import {
   SwapOutlined,
   FundOutlined,
   FireOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -267,11 +269,13 @@ export default function DashboardPage() {
         {(() => {
           /* 상위 종목 + 기타 보유 종목을 합쳐서 테이블 데이터 생성 */
           const extraHeld = heldSymbols.filter((s) => !topSymbols.includes(s));
+          const volMap = botState?.symbol_volatilities ?? {};
           const allRows = [
             ...topSymbols.map((symbol, idx) => ({
               key: symbol,
               rank: idx + 1,
               symbol,
+              volatility: volMap[symbol] as number | undefined,
               pos: heldPositions.get(symbol) ?? null,
               snap: latestSnapshots.get(symbol) ?? null,
               ticker: tickers.get(symbol) ?? null,
@@ -280,6 +284,7 @@ export default function DashboardPage() {
               key: symbol,
               rank: null as number | null,
               symbol,
+              volatility: volMap[symbol] as number | undefined,
               pos: heldPositions.get(symbol) ?? null,
               snap: latestSnapshots.get(symbol) ?? null,
               ticker: tickers.get(symbol) ?? null,
@@ -332,6 +337,39 @@ export default function DashboardPage() {
                       )}
                     </Flex>
                   ),
+                },
+                {
+                  title: (
+                    <Space size={4}>
+                      <span>변동성</span>
+                      <Tooltip
+                        title={
+                          <div>
+                            <div>단기(4h) / 장기(2일) 변동성 비율</div>
+                            <div style={{ marginTop: 6 }}>
+                              <span style={{ color: '#389e0d' }}>■</span> &lt;1.5x — 안정 (매수 가능)
+                            </div>
+                            <div>
+                              <span style={{ color: '#fa8c16' }}>■</span> 1.5x~2.0x — 주의
+                            </div>
+                            <div>
+                              <span style={{ color: '#cf1322' }}>■</span> ≥2.0x — 과부하 (매수 중단)
+                            </div>
+                          </div>
+                        }
+                      >
+                        <InfoCircleOutlined style={{ fontSize: 11, color: '#999', cursor: 'pointer' }} />
+                      </Tooltip>
+                    </Space>
+                  ),
+                  dataIndex: 'volatility',
+                  width: 85,
+                  align: 'right' as const,
+                  render: (vol: number | undefined) => {
+                    if (vol == null) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+                    const color = vol >= 2.0 ? '#cf1322' : vol >= 1.5 ? '#fa8c16' : '#389e0d';
+                    return <Text style={{ fontSize: 12, color, fontWeight: 500 }}>{vol.toFixed(2)}x</Text>;
+                  },
                 },
                 {
                   title: '현재가',

@@ -92,7 +92,7 @@ export default function AuthCallbackPage() {
         {state === 'success' && (
           <Alert
             type="success"
-            message="로그인 성공!"
+            title="로그인 성공!"
             description="대시보드로 이동합니다..."
             showIcon
             style={{ maxWidth: 400 }}
@@ -102,7 +102,7 @@ export default function AuthCallbackPage() {
         {state === 'error' && (
           <Alert
             type="error"
-            message="로그인 실패"
+            title="로그인 실패"
             description={errorMsg}
             showIcon
             style={{ maxWidth: 400 }}

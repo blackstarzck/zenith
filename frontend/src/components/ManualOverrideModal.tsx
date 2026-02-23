@@ -65,7 +65,7 @@ export default function ManualOverrideModal({
     >
       {/* Bot control */}
       <Alert
-        message={
+title={
           isActive
             ? '봇이 현재 실행 중입니다. 일시정지하면 신규 진입이 중단됩니다.'
             : '봇이 일시정지 상태입니다. 재시작하면 자동 매매가 재개됩니다.'

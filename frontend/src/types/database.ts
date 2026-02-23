@@ -27,12 +27,19 @@ export interface SystemLog {
   created_at: string;
 }
 
+export type UpbitStatus = 'connected' | 'auth_failed' | 'rate_limited' | 'error' | 'unknown';
+export type KakaoStatus = 'connected' | 'token_expired' | 'send_failed' | 'no_token' | 'unknown';
+
 export interface BotState {
   id: number;
   initial_balance: number;
   current_balance: number;
   krw_balance: number;
   top_symbols: string[];
+  symbol_volatilities: Record<string, number>;
+  is_active: boolean;
+  upbit_status: UpbitStatus;
+  kakao_status: KakaoStatus;
   updated_at: string;
 }
 

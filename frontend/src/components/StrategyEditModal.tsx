@@ -75,7 +75,7 @@ export default function StrategyEditModal({
       destroyOnClose
     >
       <Alert
-        message="실시간 변경은 다음 틱부터 적용됩니다"
+        title="실시간 변경은 다음 틱부터 적용됩니다"
         type="warning"
         showIcon
         style={{ marginBottom: 16 }}

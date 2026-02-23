@@ -158,6 +158,10 @@ class StorageClient:
         current_balance: float | None = None,
         krw_balance: float | None = None,
         top_symbols: list[str] | None = None,
+        symbol_volatilities: dict[str, float] | None = None,
+        is_active: bool | None = None,
+        upbit_status: str | None = None,
+        kakao_status: str | None = None,
     ) -> None:
         """봇 실시간 상태를 갱신합니다 (단일 행 upsert).
 
@@ -175,6 +179,14 @@ class StorageClient:
             row["krw_balance"] = krw_balance
         if top_symbols is not None:
             row["top_symbols"] = top_symbols
+        if symbol_volatilities is not None:
+            row["symbol_volatilities"] = symbol_volatilities
+        if is_active is not None:
+            row["is_active"] = is_active
+        if upbit_status is not None:
+            row["upbit_status"] = upbit_status
+        if kakao_status is not None:
+            row["kakao_status"] = kakao_status
         try:
             self._client.table("bot_state").upsert(
                 row, on_conflict="id"

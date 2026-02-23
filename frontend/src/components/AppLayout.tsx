@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
-import { Layout, Menu, Typography, Tooltip, Progress, Avatar, Dropdown, Drawer, Badge, Tag, Empty, DatePicker, Button, Spin } from 'antd';
+import { useState } from 'react';
+import { Layout, Menu, Typography, Tooltip, Progress, Avatar, Dropdown, Drawer, Badge, Tag, Empty, DatePicker, Button, Spin, Space } from 'antd';
 import {
   DashboardOutlined,
   SwapOutlined,
@@ -15,11 +15,12 @@ import {
   ThunderboltOutlined,
   LeftOutlined,
   RightOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { useSystemLogs } from '../hooks/useSupabase';
-import type { SystemLog } from '../types/database';
+import { useSystemLogs, useBotState } from '../hooks/useSupabase';
+import type { SystemLog, UpbitStatus, KakaoStatus } from '../types/database';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 
@@ -33,12 +34,29 @@ const menuItems = [
   { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
 ];
 
-type BotStatus = 'active' | 'warning' | 'error';
+type BotStatus = 'online' | 'warning' | 'error';
 
 const statusConfig: Record<BotStatus, { color: string; label: string }> = {
-  active: { color: '#52c41a', label: 'Bot Active' },
+  online: { color: '#52c41a', label: 'Bot Active' },
   warning: { color: '#faad14', label: 'Bot Warning' },
   error: { color: '#ff4d4f', label: 'Bot Stopped' },
+};
+
+/* ── 업비트 · 카카오 상태 라벨 ─────────────────────────── */
+const UPBIT_STATUS_LABEL: Record<UpbitStatus, { text: string; color: string }> = {
+  connected:    { text: '연결됨',     color: '#52c41a' },
+  auth_failed:  { text: '인증실패',   color: '#ff4d4f' },
+  rate_limited: { text: '요청제한',   color: '#faad14' },
+  error:        { text: '오류',       color: '#ff4d4f' },
+  unknown:      { text: '확인 중',    color: '#666' },
+};
+
+const KAKAO_STATUS_LABEL: Record<KakaoStatus, { text: string; color: string }> = {
+  connected:     { text: '연결됨',       color: '#52c41a' },
+  token_expired: { text: '토큰만료',     color: '#ff4d4f' },
+  send_failed:   { text: '전송실패',     color: '#faad14' },
+  no_token:      { text: '미설정',       color: '#666' },
+  unknown:       { text: '확인 중',      color: '#666' },
 };
 
 /* ── 로그 레벨별 시각 설정 ─────────────────────────────── */
@@ -86,27 +104,46 @@ function getLogConfig(level: SystemLog['level']) {
   return LOG_LEVEL_CONFIG[level] ?? LOG_LEVEL_CONFIG.INFO;
 }
 
+function getBotStatusTooltip(
+  _botStatus: BotStatus,
+  upbitStatus: UpbitStatus,
+  _kakaoStatus: KakaoStatus,
+  isActive: boolean | undefined,
+): string {
+  if (isActive) return '봇이 정상 작동 중입니다';
+  if (upbitStatus === 'auth_failed') return '업비트 API 인증 실패로 중단되었습니다';
+  if (upbitStatus === 'rate_limited') return '업비트 API 요청 제한으로 대기 중입니다';
+  return '봇이 중지되었습니다';
+}
+
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
-  const [botStatus] = useState<BotStatus>('active');
+  const { botState } = useBotState();
   const [apiUsage] = useState(35);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
   const { logs, loading: logsLoading } = useSystemLogs(selectedDate);
-  const logEndRef = useRef<HTMLDivElement>(null);
-
   const isToday = selectedDate === dayjs().format('YYYY-MM-DD');
-  const status = statusConfig[botStatus];
-  const apiColor = apiUsage < 50 ? '#52c41a' : apiUsage < 80 ? '#faad14' : '#ff4d4f';
 
-  // 새 로그 도착 시 자동 스크롤 (오늘만)
-  useEffect(() => {
-    if (drawerOpen && isToday) {
-      logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [logs.length, drawerOpen, isToday]);
+  /* ── 봇 상태 판정 (bot_state.is_active + updated_at 기반) ── */
+  const botStatus: BotStatus = (() => {
+    if (!botState) return 'error';
+    if (!botState.is_active) return 'error';
+    if (!botState.updated_at) return 'warning';
+    const diffSec = dayjs().diff(dayjs(botState.updated_at), 'second');
+    if (diffSec < 60) return 'online';
+    if (diffSec < 300) return 'warning';
+    return 'error';
+  })();
+  const status = statusConfig[botStatus];
+  const upbitStatus: UpbitStatus = botState?.upbit_status ?? 'unknown';
+  const kakaoStatus: KakaoStatus = botState?.kakao_status ?? 'unknown';
+  const upbitLabel = UPBIT_STATUS_LABEL[upbitStatus] ?? UPBIT_STATUS_LABEL.unknown;
+  const kakaoLabel = KAKAO_STATUS_LABEL[kakaoStatus] ?? KAKAO_STATUS_LABEL.unknown;
+  const botTooltip = getBotStatusTooltip(botStatus, upbitStatus, kakaoStatus, botState?.is_active);
+  const apiColor = apiUsage < 50 ? '#52c41a' : apiUsage < 80 ? '#faad14' : '#ff4d4f';
 
   const goToPrevDay = () => {
     setSelectedDate(dayjs(selectedDate).subtract(1, 'day').format('YYYY-MM-DD'));
@@ -178,6 +215,36 @@ export default function AppLayout() {
             gap: 16,
           }}
         >
+          {/* 업비트 연결 상태 */}
+          <Tooltip title={`업비트 API: ${upbitLabel.text}`}>
+            <Tag
+              style={{
+                background: 'transparent',
+                borderColor: upbitLabel.color,
+                color: upbitLabel.color,
+                fontSize: 11,
+                margin: 0,
+              }}
+            >
+              Upbit · {upbitLabel.text}
+            </Tag>
+          </Tooltip>
+
+          {/* 카카오 인증 상태 */}
+          <Tooltip title={`카카오 알림: ${kakaoLabel.text}`}>
+            <Tag
+              style={{
+                background: 'transparent',
+                borderColor: kakaoLabel.color,
+                color: kakaoLabel.color,
+                fontSize: 11,
+                margin: 0,
+              }}
+            >
+              Kakao · {kakaoLabel.text}
+            </Tag>
+          </Tooltip>
+
           {/* API Health Gauge */}
           <Tooltip title={`API 사용량: ${apiUsage}/100 (잔여 ${100 - apiUsage})`}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -194,18 +261,20 @@ export default function AppLayout() {
           </Tooltip>
 
           {/* Heartbeat Indicator */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div
-              className={`heartbeat-dot heartbeat-${botStatus}`}
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: '50%',
-                background: status.color,
-              }}
-            />
-            <Text style={{ color: status.color, fontSize: 13 }}>{status.label}</Text>
-          </div>
+          <Tooltip title={botTooltip}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                className={`heartbeat-dot heartbeat-${botStatus}`}
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: '50%',
+                  background: status.color,
+                }}
+              />
+              <Text style={{ color: status.color, fontSize: 13 }}>{status.label}</Text>
+            </div>
+          </Tooltip>
 
           {/* Log Drawer Toggle */}
           <Tooltip title="백엔드 로그">
@@ -271,10 +340,25 @@ export default function AppLayout() {
       <Drawer
         title={
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ color: '#d0d0d0' }}>
-              <CodeOutlined style={{ marginRight: 8 }} />
-              백엔드 로그
-            </span>
+            <Space size={8}>
+              <span style={{ color: '#d0d0d0' }}>
+                <CodeOutlined style={{ marginRight: 8 }} />
+                백엔드 로그
+              </span>
+              <Tooltip
+                title={
+                  <div>
+                    <div style={{ marginBottom: 4, fontWeight: 600 }}>로그 유형 안내</div>
+                    <div><CheckCircleOutlined style={{ color: '#52c41a' }} /> <b>INFO</b> — 정상 작동 기록</div>
+                    <div><WarningOutlined style={{ color: '#faad14' }} /> <b>WARNING</b> — 주의 필요 (성능 저하, 재시도 등)</div>
+                    <div><CloseCircleOutlined style={{ color: '#ff4d4f' }} /> <b>ERROR</b> — 오류 발생 (기능 일부 실패)</div>
+                    <div><ThunderboltOutlined style={{ color: '#ff1744' }} /> <b>CRITICAL</b> — 심각한 장애 (봇 중단 가능)</div>
+                  </div>
+                }
+              >
+                <InfoCircleOutlined style={{ fontSize: 13, color: '#666', cursor: 'pointer' }} />
+              </Tooltip>
+            </Space>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <Button
                 type="text"
@@ -391,7 +475,6 @@ export default function AppLayout() {
                 </div>
               );
             })}
-            <div ref={logEndRef} />
           </div>
         )}
       </Drawer>

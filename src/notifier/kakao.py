@@ -38,6 +38,12 @@ class KakaoNotifier:
         self._access_token = config.access_token
         self._refresh_token = config.refresh_token
         self._tokens_loaded = False
+        self._api_status: str = "unknown"  # connected | token_expired | send_failed | no_token
+
+    @property
+    def api_status(self) -> str:
+        """최근 카카오 API 호출 결과 기반 상태를 반환합니다."""
+        return self._api_status
 
     def _ensure_tokens(self) -> None:
         """Supabase에서 최신 토큰을 로드합니다 (1회)."""
@@ -67,6 +73,7 @@ class KakaoNotifier:
 
         if not self._access_token:
             logger.warning("카카오 Access Token이 설정되지 않아 알림을 건너뜁니다.")
+            self._api_status = "no_token"
             return False
 
         template = {
@@ -91,6 +98,7 @@ class KakaoNotifier:
 
             if resp.status_code == 401:
                 # 토큰 만료 → 갱신 후 재시도
+                self._api_status = "token_expired"
                 refreshed = await self._refresh_access_token()
                 if refreshed:
                     return await self.send_text(message)
@@ -98,13 +106,16 @@ class KakaoNotifier:
 
             if resp.status_code == 200:
                 logger.info("카카오톡 알림 전송 성공")
+                self._api_status = "connected"
                 return True
 
             logger.warning("카카오톡 알림 실패: %d %s", resp.status_code, resp.text)
+            self._api_status = "send_failed"
             return False
 
         except Exception:
             logger.exception("카카오톡 알림 전송 중 오류")
+            self._api_status = "send_failed"
             return False
 
     # ── 수익/손실 알림 템플릿 ──────────────────────────────
