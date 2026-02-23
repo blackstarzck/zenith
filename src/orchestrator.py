@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from datetime import date, datetime
@@ -54,6 +53,20 @@ class Orchestrator:
         self._today: date = date.today()
         self._daily_report_sent: bool = False  # 당일 08:00 리포트 발송 여부
 
+    # ── 안전한 알림 래퍼 ───────────────────────────────────
+
+    def _safe_notify(self, method: str, *args, **kwargs) -> None:
+        """알림 전송을 안전하게 실행합니다.
+
+        알림 실패가 메인 루프를 죽이지 않도록 모든 예외를 삼킵니다.
+        """
+        try:
+            func = getattr(self._notifier, method, None)
+            if func:
+                func(*args, **kwargs)
+        except Exception:
+            logger.warning("알림 전송 실패 (%s) — 무시하고 계속합니다.", method)
+
     # ── 메인 루프 ────────────────────────────────────────────
 
     def run(self) -> None:
@@ -84,27 +97,31 @@ class Orchestrator:
             )
         except Exception as e:
             logger.critical("초기화 실패: %s", e)
-            asyncio.run(self._notifier.notify_error(f"봇 초기화 실패: {e}"))
+            self._safe_notify("notify_error", f"봇 초기화 실패: {e}")
             return
 
         self._running = True
         self._storage.upsert_bot_state(is_active=True)
 
-        while self._running:
-            try:
-                self._tick()
-            except KeyboardInterrupt:
-                logger.info("사용자 종료 요청")
-                self._running = False
-            except Exception as e:
-                logger.exception("메인 루프 오류")
-                asyncio.run(self._notifier.notify_error(f"메인 루프 오류: {e}"))
+        try:
+            while self._running:
+                try:
+                    self._tick()
+                except KeyboardInterrupt:
+                    logger.info("사용자 종료 요청")
+                    self._running = False
+                except Exception:
+                    logger.exception("메인 루프 오류")
+                    # 알림 실패가 봇을 죽이지 않도록 안전 래퍼 사용
+                    self._safe_notify("notify_error", "메인 루프 오류 발생 — 로그를 확인하세요.")
 
-            if self._running:
-                time.sleep(self._config.loop_interval_sec)
-
-        self._storage.upsert_bot_state(is_active=False)
-        logger.info("=== Zenith 트레이딩 봇 종료 ===")
+                if self._running:
+                    time.sleep(self._config.loop_interval_sec)
+        finally:
+            # 리소스 정리 (HTTP 클라이언트 등)
+            self._storage.upsert_bot_state(is_active=False)
+            self._notifier.close()
+            logger.info("=== Zenith 트레이딩 봇 종료 ===")
 
     def stop(self) -> None:
         """봇을 안전하게 중지합니다."""
@@ -162,11 +179,13 @@ class Orchestrator:
                 )
             except Exception as e:
                 logger.error("오늘 일일 통계 갱신 실패: %s", e)
+                balance = 0.0  # 아래 스냅샷 저장에서 사용할 폴백 값
             # 4-2. 잔고 스냅샷 저장 (시간별 자산 성장 곡선용)
-            try:
-                self._storage.insert_balance_snapshot(balance)
-            except Exception as e:
-                logger.error("잔고 스냅샷 저장 실패: %s", e)
+            if balance > 0:
+                try:
+                    self._storage.insert_balance_snapshot(balance)
+                except Exception as e:
+                    logger.error("잔고 스냅샷 저장 실패: %s", e)
 
         # 5. 일일 리포트 (매일 08:00 1회 발송)
         if not self._daily_report_sent and datetime.now().hour >= 8:
@@ -448,9 +467,7 @@ class Orchestrator:
             reason=reason,
         )
 
-        asyncio.run(
-            self._notifier.notify_pnl(symbol, result.price, pnl, pnl_pct, reason)
-        )
+        self._safe_notify("notify_pnl", symbol, result.price, pnl, pnl_pct, reason)
 
     def _execute_sell_all(self, symbol: str, pos, reason: str, label: str = "전량 매도") -> None:
         """전량 매도를 실행합니다."""
@@ -485,15 +502,11 @@ class Orchestrator:
             reason=reason,
         )
 
-        asyncio.run(
-            self._notifier.notify_pnl(symbol, result.price, pnl, pnl_pct, reason)
-        )
+        self._safe_notify("notify_pnl", symbol, result.price, pnl, pnl_pct, reason)
 
         # 일일 손실 한도 초과 알림
         if self._risk.is_daily_stopped:
-            asyncio.run(
-                self._notifier.notify_daily_stop(self._risk.daily_realized_pnl)
-            )
+            self._safe_notify("notify_daily_stop", self._risk.daily_realized_pnl)
 
     # ── 유틸리티 ─────────────────────────────────────────────
 
@@ -571,11 +584,24 @@ class Orchestrator:
             logger.info("BB 이탈 상태 복구 완료: %d개 종목", recovered)
 
     def _get_total_balance_krw(self) -> float:
-        """전체 자산을 KRW 기준으로 환산합니다."""
-        krw = self._collector.get_krw_balance()
+        """전체 자산을 KRW 기준으로 환산합니다.
+
+        네트워크 오류 시에도 봇이 죽지 않도록 개별 API 호출을 보호합니다.
+        """
+        try:
+            krw = self._collector.get_krw_balance()
+        except Exception as e:
+            logger.error("KRW 잔고 조회 실패: %s", e)
+            krw = 0.0
+
         total = krw
 
-        balances = self._collector.get_balances()
+        try:
+            balances = self._collector.get_balances()
+        except Exception as e:
+            logger.error("전체 잔고 조회 실패: %s", e)
+            return total
+
         for b in balances:
             currency = b.get("currency", "")
             if currency == "KRW":
@@ -585,7 +611,10 @@ class Orchestrator:
             if balance > 0 and avg_price > 0:
                 # 현재가로 환산 시도
                 symbol = f"KRW-{currency}"
-                current = self._collector.get_current_price(symbol)
+                try:
+                    current = self._collector.get_current_price(symbol)
+                except Exception:
+                    current = None
                 if current:
                     total += balance * current
                 else:
@@ -635,6 +664,9 @@ class Orchestrator:
                 )
             except Exception as e:
                 logger.error("일일 통계 저장/리셋 실패: %s", e)
+                # 날짜 전환은 반드시 수행 (다음 틱에서 무한 반복 방지)
+                self._today = today
+                self._daily_report_sent = False
 
             # 오래된 가격 스냅샷 정리 (7일 초과)
             try:
@@ -658,10 +690,9 @@ class Orchestrator:
                 t for t in trades
                 if t.get("created_at", "").startswith(str(self._today))
             ]
-            asyncio.run(
-                self._notifier.notify_daily_report(
-                    balance, pnl, pnl_pct, len(today_trades)
-                )
+            self._safe_notify(
+                "notify_daily_report",
+                balance, pnl, pnl_pct, len(today_trades),
             )
         except Exception as e:
             logger.error("일일 리포트 전송 실패: %s", e)

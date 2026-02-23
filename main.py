@@ -4,7 +4,9 @@ Zenith — 암호화폐 AI 자동 매매 시스템.
 """
 
 import logging
+import signal
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from supabase import create_client
@@ -12,6 +14,17 @@ from supabase import create_client
 from src.config import load_config
 from src.orchestrator import Orchestrator
 from src.storage.log_handler import SupabaseLogHandler
+
+# SIGTERM 으로 종료할 봇 인스턴스 참조
+_bot_instance: Orchestrator | None = None
+
+
+def _handle_sigterm(signum: int, frame) -> None:
+    """SIGTERM 수신 시 봇을 안전하게 종료합니다."""
+    logger = logging.getLogger(__name__)
+    logger.info("SIGTERM 수신 — 안전 종료를 시작합니다.")
+    if _bot_instance is not None:
+        _bot_instance.stop()
 
 
 def setup_logging() -> None:
@@ -32,18 +45,22 @@ def setup_logging() -> None:
     console.setFormatter(logging.Formatter(log_format, date_format))
     root_logger.addHandler(console)
 
-    # 파일 핸들러
-    file_handler = logging.FileHandler(
+    # 파일 핸들러 (RotatingFileHandler — 10MB × 5개 파일 로테이션)
+    file_handler = RotatingFileHandler(
         log_dir / "zenith.log",
+        maxBytes=10 * 1024 * 1024,  # 10MB
+        backupCount=5,
         encoding="utf-8",
     )
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(logging.Formatter(log_format, date_format))
     root_logger.addHandler(file_handler)
 
-    # 에러 전용 파일 핸들러
-    error_handler = logging.FileHandler(
+    # 에러 전용 파일 핸들러 (RotatingFileHandler — 5MB × 3개)
+    error_handler = RotatingFileHandler(
         log_dir / "error.log",
+        maxBytes=5 * 1024 * 1024,  # 5MB
+        backupCount=3,
         encoding="utf-8",
     )
     error_handler.setLevel(logging.ERROR)
@@ -67,8 +84,13 @@ def attach_supabase_handler(supabase_url: str, supabase_key: str) -> bool:
 
 def main() -> None:
     """봇 진입점."""
+    global _bot_instance
+
     setup_logging()
     logger = logging.getLogger(__name__)
+
+    # SIGTERM 핸들러 등록 (Docker/systemd graceful shutdown)
+    signal.signal(signal.SIGTERM, _handle_sigterm)
 
     logger.info("=" * 60)
     logger.info("Zenith Trading Bot v1.0")
@@ -97,6 +119,7 @@ def main() -> None:
             )
 
         bot = Orchestrator(config)
+        _bot_instance = bot
         bot.run()
 
     except KeyboardInterrupt:

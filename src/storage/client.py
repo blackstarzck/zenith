@@ -17,7 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 class StorageClient:
-    """Supabase DB 클라이언트 — 동기 방식."""
+    """Supabase DB 클라이언트 — 동기 방식.
+
+    안정성 개선:
+    - insert_trade(), upsert_daily_stats(), get_trades() 에 try/except 추가
+    - DB 장애 시에도 봇 프로세스가 죽지 않도록 보호
+    """
 
     def __init__(self, config: SupabaseConfig) -> None:
         if not config.url or not config.secret_key:
@@ -55,9 +60,13 @@ class StorageClient:
         if reason is not None:
             row["reason"] = reason
 
-        result = self._client.table("trades").insert(row).execute()
-        logger.info("Trade recorded: %s %s @ %s", side, symbol, price)
-        return result.data[0] if result.data else {}
+        try:
+            result = self._client.table("trades").insert(row).execute()
+            logger.info("Trade recorded: %s %s @ %s", side, symbol, price)
+            return result.data[0] if result.data else {}
+        except Exception:
+            logger.exception("거래 기록 저장 실패: %s %s", side, symbol)
+            return {}
 
     def get_trades(
         self,
@@ -65,17 +74,21 @@ class StorageClient:
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         """최근 매매 이력을 조회합니다."""
-        query = self._client.table("trades").select("*").order("created_at", desc=True).limit(limit)
-        if symbol:
-            query = query.eq("symbol", symbol)
-        result = query.execute()
-        return result.data or []
+        try:
+            query = self._client.table("trades").select("*").order("created_at", desc=True).limit(limit)
+            if symbol:
+                query = query.eq("symbol", symbol)
+            result = query.execute()
+            return result.data or []
+        except Exception:
+            logger.exception("거래 이력 조회 실패")
+            return []
 
     # ── daily_stats ──────────────────────────────────────────
 
     def upsert_daily_stats(
         self,
-        stats_date: date,
+        stats_date: "date",
         total_balance: float,
         net_profit: float,
         drawdown: float,
@@ -87,24 +100,32 @@ class StorageClient:
             "net_profit": net_profit,
             "drawdown": drawdown,
         }
-        result = (
-            self._client.table("daily_stats")
-            .upsert(row, on_conflict="stats_date")
-            .execute()
-        )
-        logger.info("Daily stats upserted for %s", stats_date)
-        return result.data[0] if result.data else {}
+        try:
+            result = (
+                self._client.table("daily_stats")
+                .upsert(row, on_conflict="stats_date")
+                .execute()
+            )
+            logger.info("Daily stats upserted for %s", stats_date)
+            return result.data[0] if result.data else {}
+        except Exception:
+            logger.exception("일일 통계 저장 실패: %s", stats_date)
+            return {}
 
     def get_daily_stats(self, days: int = 30) -> list[dict[str, Any]]:
         """최근 N일간 성과 지표를 조회합니다."""
-        result = (
-            self._client.table("daily_stats")
-            .select("*")
-            .order("stats_date", desc=True)
-            .limit(days)
-            .execute()
-        )
-        return result.data or []
+        try:
+            result = (
+                self._client.table("daily_stats")
+                .select("*")
+                .order("stats_date", desc=True)
+                .limit(days)
+                .execute()
+            )
+            return result.data or []
+        except Exception:
+            logger.exception("일일 통계 조회 실패")
+            return []
 
     # ── balance_snapshots ────────────────────────────────────
 
@@ -126,6 +147,7 @@ class StorageClient:
             self._client.table("balance_snapshots").delete().lt("created_at", cutoff).execute()
         except Exception:
             logger.exception("Failed to cleanup old balance snapshots")
+
     # ── system_logs ──────────────────────────────────────────
 
     def insert_log(self, level: str, message: str) -> None:
@@ -143,14 +165,18 @@ class StorageClient:
 
     def get_recent_logs(self, limit: int = 20) -> list[dict[str, Any]]:
         """최근 시스템 로그를 조회합니다."""
-        result = (
-            self._client.table("system_logs")
-            .select("*")
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        return result.data or []
+        try:
+            result = (
+                self._client.table("system_logs")
+                .select("*")
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception:
+            logger.exception("시스템 로그 조회 실패")
+            return []
 
     # ── bot_state (단일 행) ───────────────────────────────────
 
@@ -283,6 +309,7 @@ class StorageClient:
             logger.info("price_snapshots %d일 이전 데이터 정리 완료", days)
         except Exception:
             logger.exception("가격 스냅샷 정리 실패")
+
     # ── daily_reports ─────────────────────────────────────────
 
     def upsert_daily_report(
