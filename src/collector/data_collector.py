@@ -148,8 +148,21 @@ class UpbitCollector:
     # ── 계좌 정보 ────────────────────────────────────────────
 
     def get_balances(self) -> list[dict[str, Any]]:
-        """전체 잔고를 조회합니다."""
-        return self._upbit.get_balances()
+        """전체 잔고를 조회합니다.
+
+        pyupbit가 API 에러 시 dict(에러 응답)이나 문자열을 반환할 수 있으므로
+        반드시 list[dict] 형태인지 검증합니다.
+        """
+        result = self._upbit.get_balances()
+        # pyupbit는 에러 시 dict/str 등 예상 외 타입을 반환할 수 있음
+        if not isinstance(result, list):
+            logger.warning("get_balances() 비정상 응답 (type=%s): %s", type(result).__name__, result)
+            return []
+        # 리스트 내부 항목이 dict인지 검증 (문자열 키가 섞인 경우 방지)
+        validated = [item for item in result if isinstance(item, dict)]
+        if len(validated) != len(result):
+            logger.warning("get_balances() 응답에 비정상 항목 %d건 제거", len(result) - len(validated))
+        return validated
 
     def get_balance(self, symbol: str) -> float:
         """특정 코인의 보유 수량을 반환합니다."""

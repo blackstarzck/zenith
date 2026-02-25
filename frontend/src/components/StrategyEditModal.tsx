@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   Modal,
   Form,
@@ -10,8 +10,10 @@ import {
   Divider,
   Row,
   Col,
+  message,
 } from 'antd';
-import { EditOutlined } from '@ant-design/icons';
+import { EditOutlined, UndoOutlined, CheckOutlined } from '@ant-design/icons';
+import { DEFAULT_STRATEGY as SHARED_DEFAULT, PRESETS, getActivePresetName } from '../lib/strategyParams';
 
 const { Title } = Typography;
 
@@ -22,7 +24,9 @@ export interface StrategyParams {
   rsi_oversold: number;
   atr_period: number;
   atr_multiplier: number;
+  top_volume?: number;
 }
+
 
 interface Props {
   open: boolean;
@@ -38,6 +42,13 @@ export default function StrategyEditModal({
   onApply,
 }: Props) {
   const [form] = Form.useForm<StrategyParams>();
+  const [messageApi, contextHolder] = message.useMessage();
+
+  const currentFormValues = Form.useWatch([], form);
+  const activePreset = useMemo(
+    () => currentFormValues ? getActivePresetName({ ...currentParams, ...currentFormValues } as StrategyParams) : null,
+    [currentFormValues, currentParams],
+  );
 
   useEffect(() => {
     if (open) {
@@ -47,7 +58,8 @@ export default function StrategyEditModal({
 
   const handleApply = () => {
     const values = form.getFieldsValue();
-    onApply(values);
+    // top_volume은 모달 폼에 없으므로 currentParams에서 보존
+    onApply({ ...currentParams, ...values });
     onClose();
   };
 
@@ -72,11 +84,12 @@ export default function StrategyEditModal({
         </Space>
       }
       width={520}
-      destroyOnClose
+      destroyOnHidden
     >
+      {contextHolder}
       <Alert
-        title="실시간 변경은 다음 틱부터 적용됩니다"
-        type="warning"
+        title="변경 사항은 Supabase에 저장되며, 약 1분 내 봇에 자동 적용됩니다"
+        type="info"
         showIcon
         style={{ marginBottom: 16 }}
       />
@@ -128,6 +141,43 @@ export default function StrategyEditModal({
               <InputNumber min={1} max={5} step={0.1} style={{ width: '100%' }} />
             </Form.Item>
           </Col>
+        </Row>
+
+        <Divider titlePlacement="left" plain>
+          프리셋
+        </Divider>
+        <Button
+          icon={activePreset === '기본값' ? <CheckOutlined /> : <UndoOutlined />}
+          type={activePreset === '기본값' ? 'primary' : 'default'}
+          ghost={activePreset === '기본값'}
+          onClick={() => {
+            form.setFieldsValue(SHARED_DEFAULT);
+            messageApi.info('기본값으로 복원되었습니다. 적용 버튼을 눌러 적용하세요.');
+          }}
+          block
+        >
+          기본값 복원
+        </Button>
+        <Row gutter={[8, 8]} style={{ marginTop: 8 }}>
+          {PRESETS.map((preset) => (
+            <Col span={12} key={preset.name}>
+              <Button
+                block
+                type={activePreset === preset.name ? 'primary' : 'default'}
+                ghost={activePreset === preset.name}
+                icon={activePreset === preset.name ? <CheckOutlined style={{ fontSize: 12 }} /> : undefined}
+                onClick={() => {
+                  form.setFieldsValue(preset.params);
+                  messageApi.info(`'${preset.name}' 프리셋이 적용되었습니다. 적용 버튼을 눌러 적용하세요.`);
+                }}
+              >
+                <div style={{ lineHeight: 1.3 }}>
+                  <div>{preset.name}</div>
+                  <div style={{ fontSize: 11, opacity: 0.65 }}>{preset.description}</div>
+                </div>
+              </Button>
+            </Col>
+          ))}
         </Row>
       </Form>
     </Modal>

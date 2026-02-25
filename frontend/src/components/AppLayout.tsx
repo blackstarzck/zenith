@@ -36,14 +36,6 @@ const menuItems = [
   { key: '/reports', icon: <FileTextOutlined />, label: 'Reports' },
 ];
 
-type BotStatus = 'online' | 'warning' | 'error';
-
-const statusConfig: Record<BotStatus, { color: string; label: string }> = {
-  online: { color: '#52c41a', label: 'Bot Active' },
-  warning: { color: '#faad14', label: 'Bot Warning' },
-  error: { color: '#ff4d4f', label: 'Bot Stopped' },
-};
-
 /* ── 업비트 · 카카오 상태 라벨 ─────────────────────────── */
 const UPBIT_STATUS_LABEL: Record<UpbitStatus, { text: string; color: string }> = {
   connected:    { text: '연결됨',     color: '#52c41a' },
@@ -106,18 +98,6 @@ function getLogConfig(level: SystemLog['level']) {
   return LOG_LEVEL_CONFIG[level] ?? LOG_LEVEL_CONFIG.INFO;
 }
 
-function getBotStatusTooltip(
-  _botStatus: BotStatus,
-  upbitStatus: UpbitStatus,
-  _kakaoStatus: KakaoStatus,
-  isActive: boolean | undefined,
-): string {
-  if (isActive) return '봇이 정상 작동 중입니다';
-  if (upbitStatus === 'auth_failed') return '업비트 API 인증 실패로 중단되었습니다';
-  if (upbitStatus === 'rate_limited') return '업비트 API 요청 제한으로 대기 중입니다';
-  return '봇이 중지되었습니다';
-}
-
 export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -126,25 +106,13 @@ export default function AppLayout() {
   const [apiUsage] = useState(35);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
-  const { logs, loading: logsLoading } = useSystemLogs(selectedDate);
+  const { logs, loading: logsLoading } = useSystemLogs(selectedDate, 500, drawerOpen);
   const isToday = selectedDate === dayjs().format('YYYY-MM-DD');
 
-  /* ── 봇 상태 판정 (bot_state.is_active + updated_at 기반) ── */
-  const botStatus: BotStatus = (() => {
-    if (!botState) return 'error';
-    if (!botState.is_active) return 'error';
-    if (!botState.updated_at) return 'warning';
-    const diffSec = dayjs().diff(dayjs(botState.updated_at), 'second');
-    if (diffSec < 60) return 'online';
-    if (diffSec < 300) return 'warning';
-    return 'error';
-  })();
-  const status = statusConfig[botStatus];
   const upbitStatus: UpbitStatus = botState?.upbit_status ?? 'unknown';
   const kakaoStatus: KakaoStatus = botState?.kakao_status ?? 'unknown';
   const upbitLabel = UPBIT_STATUS_LABEL[upbitStatus] ?? UPBIT_STATUS_LABEL.unknown;
   const kakaoLabel = KAKAO_STATUS_LABEL[kakaoStatus] ?? KAKAO_STATUS_LABEL.unknown;
-  const botTooltip = getBotStatusTooltip(botStatus, upbitStatus, kakaoStatus, botState?.is_active);
   const apiColor = apiUsage < 50 ? '#52c41a' : apiUsage < 80 ? '#faad14' : '#ff4d4f';
 
   const goToPrevDay = () => {
@@ -173,13 +141,15 @@ export default function AppLayout() {
   ];
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout style={{ height: '100vh', overflow: 'hidden' }}>
       <Sider
         breakpoint="lg"
         collapsedWidth={64}
         style={{
           background: '#141414',
           borderRight: '1px solid #303030',
+          height: '100vh',
+          overflowY: 'auto',
         }}
       >
         <div
@@ -205,7 +175,7 @@ export default function AppLayout() {
         />
       </Sider>
 
-      <Layout>
+      <Layout style={{ overflow: 'hidden' }}>
         <Header
           style={{
             background: '#1a1a1a',
@@ -218,7 +188,7 @@ export default function AppLayout() {
           }}
         >
           {/* 업비트 연결 상태 */}
-          <Tooltip title={`업비트 API: ${upbitLabel.text}`}>
+          <Tooltip title={`업비트 API: ${upbitLabel.text}`} destroyOnHidden>
             <Tag
               style={{
                 background: 'transparent',
@@ -233,7 +203,7 @@ export default function AppLayout() {
           </Tooltip>
 
           {/* 카카오 인증 상태 */}
-          <Tooltip title={`카카오 알림: ${kakaoLabel.text}`}>
+          <Tooltip title={`카카오 알림: ${kakaoLabel.text}`} destroyOnHidden>
             <Tag
               style={{
                 background: 'transparent',
@@ -248,7 +218,7 @@ export default function AppLayout() {
           </Tooltip>
 
           {/* API Health Gauge */}
-          <Tooltip title={`API 사용량: ${apiUsage}/100 (잔여 ${100 - apiUsage})`}>
+          <Tooltip title={`API 사용량: ${apiUsage}/100 (잔여 ${100 - apiUsage})`} destroyOnHidden>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <ApiOutlined style={{ color: apiColor, fontSize: 14 }} />
               <Progress
@@ -262,24 +232,8 @@ export default function AppLayout() {
             </div>
           </Tooltip>
 
-          {/* Heartbeat Indicator */}
-          <Tooltip title={botTooltip}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div
-                className={`heartbeat-dot heartbeat-${botStatus}`}
-                style={{
-                  width: 10,
-                  height: 10,
-                  borderRadius: '50%',
-                  background: status.color,
-                }}
-              />
-              <Text style={{ color: status.color, fontSize: 13 }}>{status.label}</Text>
-            </div>
-          </Tooltip>
-
           {/* Log Drawer Toggle */}
-          <Tooltip title="백엔드 로그">
+          <Tooltip title="백엔드 로그" destroyOnHidden>
             <Badge count={logs.length} size="small" offset={[-4, 4]} color="#1668dc">
               <div
                 onClick={() => setDrawerOpen(true)}
@@ -348,6 +302,7 @@ export default function AppLayout() {
                 백엔드 로그
               </span>
               <Tooltip
+                destroyOnHidden
                 title={
                   <div>
                     <div style={{ marginBottom: 4, fontWeight: 600 }}>로그 유형 안내</div>
@@ -427,7 +382,7 @@ export default function AppLayout() {
             style={{ padding: 40 }}
           />
         ) : (
-          <div style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 12 }}>
+          <div style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 12, height: 'calc(100vh - 120px)', overflowY: 'auto' }}>
             <div
               style={{
                 padding: '6px 12px',
@@ -453,6 +408,8 @@ export default function AppLayout() {
                     gap: 8,
                     alignItems: 'flex-start',
                     lineHeight: 1.5,
+                    contentVisibility: 'auto' as React.CSSProperties['contentVisibility'],
+                    containIntrinsicSize: 'auto 36px',
                   }}
                 >
                   <span style={{ flexShrink: 0, marginTop: 2 }}>{cfg.icon}</span>

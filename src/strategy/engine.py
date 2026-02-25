@@ -50,6 +50,10 @@ class MeanReversionEngine:
         # 종목별 이전 캔들의 BB 하단 이탈 여부 추적
         self._was_below_lower: dict[str, bool] = {}
 
+    def update_params(self, params: StrategyParams) -> None:
+        """전략 파라미터를 핫리로드합니다 (BB 추적 상태는 보존)."""
+        self._params = params
+
     def evaluate_entry(
         self,
         symbol: str,
@@ -86,14 +90,14 @@ class MeanReversionEngine:
                 price=price,
             )
 
-        # ── 1.5단계: 추세 필터 (MA20 > MA50) ──
-        if closes_series is not None and len(closes_series) >= 50:
-            is_uptrend = calc_ma_trend(closes_series, short_period=20, long_period=50)
+        # ── 1.5단계: 추세 필터 (MA 단기 > MA 장기) ──
+        if closes_series is not None and len(closes_series) >= params.ma_long_period:
+            is_uptrend = calc_ma_trend(closes_series, short_period=params.ma_short_period, long_period=params.ma_long_period)
             if is_uptrend is False:
                 return TradeSignal(
                     signal=Signal.HOLD,
                     symbol=symbol,
-                    reason=f"하락 추세 (MA20 < MA50) — 진입 보류",
+                    reason=f"하락 추세 (MA{params.ma_short_period} < MA{params.ma_long_period}) — 진입 보류",
                     price=price,
                 )
 
@@ -126,7 +130,7 @@ class MeanReversionEngine:
         # ── 3단계: RSI 확증 ──
         rsi_rising = True  # 기본값
         if closes_series is not None and len(closes_series) > 20:
-            rsi_slope = calc_rsi_slope(closes_series, params.rsi_period, lookback=3)
+            rsi_slope = calc_rsi_slope(closes_series, params.rsi_period, lookback=params.rsi_slope_lookback)
             rsi_rising = rsi_slope > 0
 
         if rsi > params.rsi_oversold and not rsi_rising:
@@ -137,8 +141,8 @@ class MeanReversionEngine:
                 price=price,
             )
 
-        if rsi > params.rsi_oversold + 5:
-            # RSI가 35 이상이면 과매도 구간이 아님 (기존 40 → 35로 엄격화)
+        if rsi > params.rsi_oversold + params.rsi_entry_ceiling_offset:
+            # RSI가 상한을 초과하면 과매도 구간이 아님
             return TradeSignal(
                 signal=Signal.HOLD,
                 symbol=symbol,

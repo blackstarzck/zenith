@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Row, Col, Card, List, Tag, Typography, Spin, Empty, Flex } from 'antd';
-import { FileTextOutlined } from '@ant-design/icons';
+import { /* FileTextOutlined */ } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import Markdown from 'react-markdown';
 import { useDailyReports, useDailyReport } from '../hooks/useSupabase';

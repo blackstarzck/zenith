@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card,
   Form,
@@ -13,17 +13,19 @@ import {
   message,
   Descriptions,
   Alert,
+  Tag,
 } from 'antd';
 import {
   ApiOutlined,
   SafetyOutlined,
   ExperimentOutlined,
-  EditOutlined,
   CheckCircleOutlined,
+  UndoOutlined,
 } from '@ant-design/icons';
-import StrategyEditModal from '../components/StrategyEditModal';
 import type { StrategyParams } from '../components/StrategyEditModal';
+import { loadStrategyParams, saveStrategyParams, DEFAULT_STRATEGY, PRESETS, getActivePresetName } from '../lib/strategyParams';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
 const { Title, Text } = Typography;
 
@@ -34,22 +36,45 @@ export default function SettingsPage() {
   const [strategyForm] = Form.useForm();
   const [messageApi, contextHolder] = message.useMessage();
   const [connecting, setConnecting] = useState(false);
-  const [strategyEditOpen, setStrategyEditOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadingParams, setLoadingParams] = useState(true);
+  const [loadedParams, setLoadedParams] = useState<StrategyParams | null>(null);
   const { user } = useAuth();
+  const [activePreset, setActivePreset] = useState<string | null>(null);
+
+  // 페이지 로드 시 DB에서 전략 파라미터 조회
+  const loadParams = useCallback(async () => {
+    setLoadingParams(true);
+    const params = await loadStrategyParams();
+    setLoadedParams(params);
+    strategyForm.setFieldsValue(params);
+    setActivePreset(getActivePresetName(params));
+    setLoadingParams(false);
+  }, [strategyForm]);
+
+  useEffect(() => {
+    loadParams();
+  }, [loadParams]);
 
   const handleApiTest = async () => {
     setConnecting(true);
-    // 시뮬레이션: 실제로는 프록시 API 호출
     setTimeout(() => {
       setConnecting(false);
       messageApi.success('API 연결 테스트 완료');
     }, 1500);
   };
 
-  const handleStrategySave = () => {
-    const values = strategyForm.getFieldsValue();
-    console.log('Strategy params:', values);
-    messageApi.success('전략 파라미터가 저장되었습니다.');
+  const handleStrategySave = async () => {
+    const values = strategyForm.getFieldsValue() as StrategyParams;
+    setSaving(true);
+    const ok = await saveStrategyParams(values);
+    setSaving(false);
+    if (ok) {
+      setActivePreset(getActivePresetName(values));
+      messageApi.success('전략 파라미터가 저장되었습니다. 약 1분 내 봇에 적용됩니다.');
+    } else {
+      messageApi.error('전략 파라미터 저장에 실패했습니다.');
+    }
   };
 
   return (
@@ -61,8 +86,8 @@ export default function SettingsPage() {
       </Title>
 
       <Alert
-        title="주의: 설정 변경은 봇 재시작 후 반영됩니다."
-        type="warning"
+        title="설정 변경은 저장 후 약 1분 내 봇에 자동 적용됩니다."
+        type="info"
         showIcon
         banner
       />
@@ -129,21 +154,14 @@ export default function SettingsPage() {
                 <ExperimentOutlined /> 전략 파라미터
               </span>
             }
-            variant="borderless"
+            loading={loadingParams}
           >
+            {!loadingParams && (
             <Form
               form={strategyForm}
               layout="vertical"
               size="middle"
-              initialValues={{
-                bb_period: 20,
-                bb_std_dev: 2.0,
-                rsi_period: 14,
-                rsi_oversold: 30,
-                atr_period: 14,
-                atr_multiplier: 2.5,
-                top_volume: 10,
-              }}
+              initialValues={loadedParams ?? DEFAULT_STRATEGY}
             >
               <Divider titlePlacement="left" plain>
                 볼린저 밴드
@@ -210,18 +228,62 @@ export default function SettingsPage() {
                 <InputNumber min={3} max={30} style={{ width: '100%' }} />
               </Form.Item>
 
-              <Button type="primary" onClick={handleStrategySave} block>
+              <Button type="primary" onClick={handleStrategySave} loading={saving} block>
                 파라미터 저장
               </Button>
+              <Divider titlePlacement="left" plain>
+                프리셋
+              </Divider>
               <Button
-                icon={<EditOutlined />}
-                onClick={() => setStrategyEditOpen(true)}
+                icon={<UndoOutlined />}
+                type={activePreset === '기본값' ? 'primary' : 'default'}
+                ghost={activePreset === '기본값'}
+                onClick={async () => {
+                  strategyForm.setFieldsValue(DEFAULT_STRATEGY);
+                  setSaving(true);
+                  const ok = await saveStrategyParams(DEFAULT_STRATEGY);
+                  setSaving(false);
+                  if (ok) {
+                    setActivePreset('기본값');
+                    messageApi.success('기본값으로 복원되었습니다.');
+                  } else {
+                    messageApi.error('기본값 복원에 실패했습니다.');
+                  }
+                }}
                 block
-                style={{ marginTop: 8 }}
               >
-                실시간 수정
+                기본값 복원
               </Button>
+              <Row gutter={[8, 8]} style={{ marginTop: 8 }}>
+                {PRESETS.map((preset) => (
+                  <Col span={12} key={preset.name}>
+                    <Button
+                      block
+                      type={activePreset === preset.name ? 'primary' : 'default'}
+                      ghost={activePreset === preset.name}
+                      onClick={async () => {
+                        strategyForm.setFieldsValue(preset.params);
+                        setSaving(true);
+                        const ok = await saveStrategyParams(preset.params);
+                        setSaving(false);
+                        if (ok) {
+                          setActivePreset(preset.name);
+                          messageApi.success(`'${preset.name}' 프리셋이 적용되었습니다.`);
+                        } else {
+                          messageApi.error('프리셋 적용에 실패했습니다.');
+                        }
+                      }}
+                    >
+                      <div style={{ lineHeight: 1.3 }}>
+                        <div>{preset.name}</div>
+                        <div style={{ fontSize: 11, opacity: 0.65 }}>{preset.description}</div>
+                      </div>
+                    </Button>
+                  </Col>
+                ))}
+              </Row>
             </Form>
+            )}
           </Card>
 
           {/* ── 리스크 설정 요약 ── */}
@@ -245,22 +307,6 @@ export default function SettingsPage() {
         </Col>
       </Row>
 
-      <StrategyEditModal
-        open={strategyEditOpen}
-        onClose={() => setStrategyEditOpen(false)}
-        currentParams={{
-          bb_period: strategyForm.getFieldValue('bb_period') ?? 20,
-          bb_std_dev: strategyForm.getFieldValue('bb_std_dev') ?? 2.0,
-          rsi_period: strategyForm.getFieldValue('rsi_period') ?? 14,
-          rsi_oversold: strategyForm.getFieldValue('rsi_oversold') ?? 30,
-          atr_period: strategyForm.getFieldValue('atr_period') ?? 14,
-          atr_multiplier: strategyForm.getFieldValue('atr_multiplier') ?? 2.5,
-        }}
-        onApply={(params: StrategyParams) => {
-          strategyForm.setFieldsValue(params);
-          messageApi.success('전략 파라미터가 실시간 적용되었습니다.');
-        }}
-      />
     </Flex>
   );
 }

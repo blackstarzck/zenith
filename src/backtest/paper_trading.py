@@ -337,6 +337,9 @@ class PaperTradingBot:
                     bb_std_dev=self._config.strategy.bb_std_dev,
                     rsi_period=self._config.strategy.rsi_period,
                     atr_period=self._config.strategy.atr_period,
+                    vol_short_window=self._config.strategy.vol_short_window,
+                    vol_long_window=self._config.strategy.vol_long_window,
+                    adx_period=self._config.strategy.adx_period,
                 )
 
                 signal = self._strategy.evaluate_exit(
@@ -379,6 +382,9 @@ class PaperTradingBot:
                     bb_std_dev=self._config.strategy.bb_std_dev,
                     rsi_period=self._config.strategy.rsi_period,
                     atr_period=self._config.strategy.atr_period,
+                    vol_short_window=self._config.strategy.vol_short_window,
+                    vol_long_window=self._config.strategy.vol_long_window,
+                    adx_period=self._config.strategy.adx_period,
                 )
 
                 signal = self._strategy.evaluate_entry(symbol, snapshot, df["close"])

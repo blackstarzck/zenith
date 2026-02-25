@@ -31,6 +31,7 @@ class IndicatorSnapshot:
     atr: float
     current_price: float
     volatility_ratio: float  # 현재 변동성 / 20일 평균 변동성
+    adx: float  # ADX 추세 강도 (0~100)
 
 
 def calc_bollinger_bands(
@@ -272,6 +273,65 @@ def calc_bb_status(
 
     return "none"
 
+def calc_adx(
+    highs: pd.Series,
+    lows: pd.Series,
+    closes: pd.Series,
+    period: int = 14,
+) -> float:
+    """ADX(Average Directional Index)를 계산합니다.
+
+    추세 강도를 측정합니다. 값이 25 이상이면 강한 추세, 20 이하면 횡보.
+
+    Args:
+        highs: 고가 시리즈
+        lows: 저가 시리즈
+        closes: 종가 시리즈
+        period: ADX 기간 (기본 14)
+
+    Returns:
+        0~100 사이의 ADX 값
+    """
+    min_required = period * 2 + 1
+    if len(closes) < min_required:
+        raise ValueError(f"데이터 부족: {len(closes)}개 < 필요 {min_required}개")
+
+    # Directional Movement 계산
+    high_diff = highs.diff()
+    low_diff = -lows.diff()
+
+    plus_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0.0)
+    minus_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0.0)
+
+    # True Range 계산
+    prev_close = closes.shift(1)
+    tr1 = highs - lows
+    tr2 = (highs - prev_close).abs()
+    tr3 = (lows - prev_close).abs()
+    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    # Wilder's EMA (alpha = 1/period) 로 스무딩
+    alpha = 1.0 / period
+    smoothed_tr = true_range.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+    smoothed_plus_dm = plus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+    smoothed_minus_dm = minus_dm.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+
+    # +DI, -DI 계산
+    plus_di = (smoothed_plus_dm / smoothed_tr) * 100
+    minus_di = (smoothed_minus_dm / smoothed_tr) * 100
+
+    # DX 계산
+    di_sum = plus_di + minus_di
+    di_diff = (plus_di - minus_di).abs()
+    dx = (di_diff / di_sum.replace(0, np.nan)) * 100
+    dx = dx.fillna(0.0)
+
+    # ADX = DX의 Wilder's EMA
+    adx = dx.ewm(alpha=alpha, min_periods=period, adjust=False).mean()
+
+    return float(adx.iloc[-1])
+
+
 
 def compute_snapshot(
     df: pd.DataFrame,
@@ -279,6 +339,9 @@ def compute_snapshot(
     bb_std_dev: float = 2.0,
     rsi_period: int = 14,
     atr_period: int = 14,
+    vol_short_window: int = 16,
+    vol_long_window: int = 192,
+    adx_period: int = 14,
 ) -> IndicatorSnapshot:
     """OHLCV DataFrame으로부터 전체 지표 스냅샷을 생성합니다.
 
@@ -288,6 +351,9 @@ def compute_snapshot(
         bb_std_dev: 볼린저 밴드 표준편차 배수
         rsi_period: RSI 기간
         atr_period: ATR 기간
+        vol_short_window: 변동성 비율 단기 윈도우
+        vol_long_window: 변동성 비율 장기 윈도우
+        adx_period: ADX 기간
 
     Returns:
         IndicatorSnapshot
@@ -300,7 +366,13 @@ def compute_snapshot(
     bb = calc_bollinger_bands(closes, bb_period, bb_std_dev)
     rsi = calc_rsi(closes, rsi_period)
     atr = calc_atr(highs, lows, closes, atr_period)
-    vol_ratio = calc_volatility_ratio(closes)
+    vol_ratio = calc_volatility_ratio(closes, vol_short_window, vol_long_window)
+
+    # ADX 계산 (데이터 부족 시 0.0 — 필터 비활성화 효과)
+    try:
+        adx = calc_adx(highs, lows, closes, adx_period)
+    except ValueError:
+        adx = 0.0
 
     return IndicatorSnapshot(
         bb=bb,
@@ -308,4 +380,5 @@ def compute_snapshot(
         atr=atr,
         current_price=current_price,
         volatility_ratio=vol_ratio,
+        adx=adx,
     )

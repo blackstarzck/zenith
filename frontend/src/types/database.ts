@@ -50,6 +50,7 @@ export interface BotState {
   is_active: boolean;
   upbit_status: UpbitStatus;
   kakao_status: KakaoStatus;
+  strategy_params: Record<string, number> | null;
   updated_at: string;
 }
 

@@ -172,10 +172,10 @@ class TestVolatilityRatio:
         assert 0.5 < ratio < 2.0
 
     def test_insufficient_data_returns_default(self):
-        """데이터 부족 시 기본값 1.0 반환."""
+        """데이터 부족 시 기본값 999.0 반환 (진입 차단)."""
         closes = make_closes([100.0] * 50)
         ratio = calc_volatility_ratio(closes, short_window=96, long_window=1920)
-        assert ratio == 1.0
+        assert ratio == 999.0
 
 
 # ── RSI Slope ────────────────────────────────────────────────

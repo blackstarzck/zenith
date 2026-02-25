@@ -5,7 +5,7 @@ Zenith 전역 설정 관리.
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict, fields as dc_fields
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -62,6 +62,37 @@ class StrategyParams:
     # 거래 대금 상위 종목 수
     top_volume_count: int = 10
 
+    # RSI 진입 상한 오프셋 (RSI > rsi_oversold + offset 이면 진입 차단)
+    rsi_entry_ceiling_offset: float = 5.0
+
+    # MA 추세 필터 기간
+    ma_short_period: int = 20
+    ma_long_period: int = 50
+
+    # 변동성 과부하 윈도우 (15분봉 기준)
+    vol_short_window: int = 16    # 4시간 (15분봉 × 16)
+    vol_long_window: int = 192    # ~2일 (15분봉 × 192)
+
+    # RSI 기울기 계산 lookback
+    rsi_slope_lookback: int = 3
+
+    # ADX 추세 강도 필터
+    adx_period: int = 14
+    adx_trend_threshold: float = 25.0  # ADX > 이 값이면 강한 추세로 판단
+
+    def to_dict(self) -> dict:
+        """StrategyParams를 딕셔너리로 변환합니다."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "StrategyParams":
+        """딕셔너리로부터 StrategyParams를 생성합니다 (미지정 필드는 기본값)."""
+        defaults = asdict(cls())
+        valid_names = {f.name for f in dc_fields(cls)}
+        for k, v in data.items():
+            if k in valid_names and v is not None:
+                defaults[k] = v
+        return cls(**defaults)
 
 @dataclass(frozen=True)
 class RiskParams:

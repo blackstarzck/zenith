@@ -5,6 +5,7 @@ Zenith — 암호화폐 AI 자동 매매 시스템.
 
 import logging
 import signal
+import socket
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -87,6 +88,9 @@ def main() -> None:
     global _bot_instance
 
     setup_logging()
+
+    # 글로벌 소켓 타임아웃 설정 — pyupbit 등 timeout 미지원 라이브러리 보호
+    socket.setdefaulttimeout(30)
     logger = logging.getLogger(__name__)
 
     # SIGTERM 핸들러 등록 (Docker/systemd graceful shutdown)

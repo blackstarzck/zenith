@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useDeferredValue, memo, useCallback } from 'react';
 import {
   Row,
   Col,
@@ -13,10 +13,13 @@ import {
   Empty,
   Segmented,
   Tooltip,
+  Button,
+  message,
 } from 'antd';
 import {
   FireOutlined,
   InfoCircleOutlined,
+  EditOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
@@ -25,6 +28,9 @@ import type { Trade, SymbolIndicators, PriceSnapshot, HeldPosition } from '../ty
 import { useUpbitTicker, type TickerData } from '../hooks/useUpbitTicker';
 import HeldCoinChart from '../components/HeldCoinChart';
 import AssetGrowthChart from '../components/AssetGrowthChart';
+import StrategyEditModal from '../components/StrategyEditModal';
+import type { StrategyParams } from '../components/StrategyEditModal';
+import { loadStrategyParams, saveStrategyParams, getActivePresetName } from '../lib/strategyParams';
 
 const { Title, Text } = Typography;
 /* ── 색상 상수 (한국 주식시장 컨벤션) ───────────────────── */
@@ -60,7 +66,6 @@ interface SymbolRow {
   indicators: SymbolIndicators | undefined;
   pos: HeldPosition | null;
   snap: PriceSnapshot | null;
-  ticker: TickerData | null;
 }
 
 /* ── 최근 거래 테이블 컬럼 ──────────────────────────────── */
@@ -138,7 +143,7 @@ const tradeColumns: ColumnsType<Trade> = [
 
 /* ── 거래대금 상위 종목 테이블 컬럼 (모듈 레벨 — 안정 참조) ── */
 
-const symbolTableColumns: ColumnsType<SymbolRow> = [
+const baseSymbolColumns: ColumnsType<SymbolRow> = [
   {
     title: '#',
     dataIndex: 'rank',
@@ -167,7 +172,7 @@ const symbolTableColumns: ColumnsType<SymbolRow> = [
     title: (
       <Space size={4}>
         <span>변동성</span>
-        <Tooltip
+        <Tooltip destroyOnHidden
           title={
             <div>
               <div>단기(4h) / 장기(2일) 변동성 비율</div>
@@ -201,7 +206,7 @@ const symbolTableColumns: ColumnsType<SymbolRow> = [
     title: (
       <Space size={4}>
         <span>추세</span>
-        <Tooltip
+        <Tooltip destroyOnHidden
           title={
             <div>
               <div>이동평균선 추세 (MA20 vs MA50)</div>
@@ -236,7 +241,7 @@ const symbolTableColumns: ColumnsType<SymbolRow> = [
     title: (
       <Space size={4}>
         <span>BB</span>
-        <Tooltip
+        <Tooltip destroyOnHidden
           title={
             <div>
               <div>볼린저밴드 하단 이탈 → 복귀 패턴</div>
@@ -271,7 +276,7 @@ const symbolTableColumns: ColumnsType<SymbolRow> = [
     title: (
       <Space size={4}>
         <span>RSI</span>
-        <Tooltip
+        <Tooltip destroyOnHidden
           title={
             <div>
               <div>RSI 과매도 + 상승전환 확인</div>
@@ -308,115 +313,257 @@ const symbolTableColumns: ColumnsType<SymbolRow> = [
       );
     },
   },
-  {
-    title: '현재가',
-    dataIndex: 'ticker',
-    width: 110,
-    align: 'right' as const,
-    render: (_: unknown, record: SymbolRow) => {
-      const t = record.ticker;
-      if (!t) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
-      const color = t.change === 'RISE' ? COLOR_RISE : t.change === 'FALL' ? COLOR_FALL : COLOR_EVEN;
-      return (
-        <Flex vertical align="flex-end" gap={0}>
-          <Text style={{ fontSize: 12, color }}>{t.trade_price.toLocaleString()}</Text>
-          <Text style={{ fontSize: 10, color }}>
-            {t.change_rate >= 0 ? '+' : ''}{t.change_rate.toFixed(2)}%
-          </Text>
-        </Flex>
-      );
+  ];
+
+/* ── 손절가·익절가 헤더 (안정 참조) ───────────────────────── */
+
+const STOP_LOSS_HEADER = (
+  <Space size={4}>
+    <span>손절가</span>
+    <Tooltip destroyOnHidden
+      title={
+        <div>
+          <div>진입가 − ATR × 2.5</div>
+          <div>현재가 ≤ 손절가 도달 시 전량 매도</div>
+          <div style={{ marginTop: 6 }}>
+            <span style={{ color: "#cf1322" }}>■</span> 1% 미만 — 위험
+          </div>
+          <div>
+            <span style={{ color: "#fa8c16" }}>■</span> 1%~3% — 주의
+          </div>
+          <div>
+            <span style={{ color: "#999" }}>■</span> 3% 이상 — 여유
+          </div>
+        </div>
+      }
+    >
+      <InfoCircleOutlined style={{ fontSize: 11, color: "#999", cursor: "pointer" }} />
+    </Tooltip>
+  </Space>
+);
+
+const TAKE_PROFIT_HEADER = (
+  <Space size={4}>
+    <span>익절가</span>
+    <Tooltip destroyOnHidden
+      title={
+        <div>
+          <div>볼린저밴드 상단선 (BB Upper)</div>
+          <div>현재가 ≥ 익절가 도달 시 전량 매도</div>
+          <div style={{ marginTop: 6 }}>
+            <span style={{ color: "#389e0d" }}>■</span> 1% 미만 — 임박
+          </div>
+          <div>
+            <span style={{ color: "#fa8c16" }}>■</span> 1%~3% — 주의
+          </div>
+          <div>
+            <span style={{ color: "#999" }}>■</span> 3% 이상 — 여유
+          </div>
+        </div>
+      }
+    >
+      <InfoCircleOutlined style={{ fontSize: 11, color: "#999", cursor: "pointer" }} />
+    </Tooltip>
+  </Space>
+);
+
+/* ── 시세 의존 컬럼 빌더 (SymbolTable 내부에서 useMemo) ──── */
+
+function buildTickerColumns(tickers: Map<string, TickerData>): ColumnsType<SymbolRow> {
+  return [
+    {
+      title: '현재가',
+      dataIndex: 'symbol',
+      width: 110,
+      align: 'right' as const,
+      render: (_: unknown, record: SymbolRow) => {
+        const t = tickers.get(record.symbol);
+        if (!t) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        const color = t.change === 'RISE' ? COLOR_RISE : t.change === 'FALL' ? COLOR_FALL : COLOR_EVEN;
+        return (
+          <Flex vertical align="flex-end" gap={0}>
+            <Text style={{ fontSize: 12, color }}>{t.trade_price.toLocaleString()}</Text>
+            <Text style={{ fontSize: 10, color }}>
+              {t.change_rate >= 0 ? '+' : ''}{t.change_rate.toFixed(2)}%
+            </Text>
+          </Flex>
+        );
+      },
     },
-  },
-  {
-    title: '매수가',
-    dataIndex: 'pos',
-    width: 120,
-    align: 'right' as const,
-    render: (_: unknown, record: SymbolRow) => {
-      if (!record.pos) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
-      const entry = record.pos.entry_price;
-      const cur = record.ticker?.trade_price ?? record.snap?.price;
-      const diff = cur ? cur - entry : null;
-      const diffColor = diff != null ? (diff >= 0 ? COLOR_RISE : COLOR_FALL) : undefined;
-      return (
-        <Flex vertical align="flex-end" gap={0}>
-          <Text style={{ fontSize: 12 }}>{entry.toLocaleString()}</Text>
-          {diff != null && (
-            <Text style={{ fontSize: 10, color: diffColor }}>
-              {diff >= 0 ? '+' : ''}{Math.round(diff).toLocaleString()}
+    {
+      title: '매수가',
+      dataIndex: 'pos',
+      width: 120,
+      align: 'right' as const,
+      render: (_: unknown, record: SymbolRow) => {
+        if (!record.pos) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        const entry = record.pos.entry_price;
+        const cur = tickers.get(record.symbol)?.trade_price ?? record.snap?.price;
+        const diff = cur ? cur - entry : null;
+        const diffColor = diff != null ? (diff >= 0 ? COLOR_RISE : COLOR_FALL) : undefined;
+        return (
+          <Flex vertical align="flex-end" gap={0}>
+            <Text style={{ fontSize: 12 }}>{entry.toLocaleString()}</Text>
+            {diff != null && (
+              <Text style={{ fontSize: 10, color: diffColor }}>
+                {diff >= 0 ? '+' : ''}{Math.round(diff).toLocaleString()}
+              </Text>
+            )}
+          </Flex>
+        );
+      },
+    },
+    {
+      title: '수익률',
+      width: 120,
+      align: 'right' as const,
+      render: (_: unknown, record: SymbolRow) => {
+        if (!record.pos) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        const currentPrice = tickers.get(record.symbol)?.trade_price ?? record.snap?.price;
+        if (!currentPrice) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        const pnlPct = ((currentPrice - record.pos.entry_price) / record.pos.entry_price) * 100;
+        const pnlAmt = (currentPrice - record.pos.entry_price) * record.pos.volume;
+        const color = pnlPct >= 0 ? COLOR_RISE : COLOR_FALL;
+        return (
+          <div style={{ lineHeight: 1.3 }}>
+            <Text style={{ fontSize: 12, color, fontWeight: 600 }}>
+              {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
+            </Text>
+            <br />
+            <Text style={{ fontSize: 11, color }}>
+              {pnlAmt >= 0 ? '+' : ''}{Math.round(pnlAmt).toLocaleString()}원
+            </Text>
+          </div>
+        );
+      },
+    },
+    {
+      title: STOP_LOSS_HEADER,
+      width: 120,
+      align: 'right' as const,
+      render: (_: unknown, record: SymbolRow) => {
+        const sl = record.snap?.stop_loss;
+        if (!sl) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        const curPrice = tickers.get(record.symbol)?.trade_price ?? record.snap?.price;
+        const distPct = curPrice ? ((curPrice - sl) / curPrice) * 100 : null;
+        const distColor = distPct != null ? (distPct < 1 ? '#cf1322' : distPct < 3 ? '#fa8c16' : '#999') : undefined;
+        return (
+          <div style={{ lineHeight: 1.3 }}>
+            <Text style={{ fontSize: 12 }}>{Math.round(sl).toLocaleString()}</Text>
+            {distPct != null && (
+              <>
+                <br />
+                <Text style={{ fontSize: 11, color: distColor }}>
+                  {distPct.toFixed(1)}%
+                </Text>
+              </>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      title: TAKE_PROFIT_HEADER,
+      width: 120,
+      align: 'right' as const,
+      render: (_: unknown, record: SymbolRow) => {
+        const tp = record.snap?.take_profit;
+        if (!tp) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        const curPrice = tickers.get(record.symbol)?.trade_price ?? record.snap?.price;
+        const distPct = curPrice ? ((tp - curPrice) / curPrice) * 100 : null;
+        const distColor = distPct != null ? (distPct < 1 ? '#389e0d' : distPct < 3 ? '#fa8c16' : '#999') : undefined;
+        return (
+          <div style={{ lineHeight: 1.3 }}>
+            <Text style={{ fontSize: 12 }}>{Math.round(tp).toLocaleString()}</Text>
+            {distPct != null && (
+              <>
+                <br />
+                <Text style={{ fontSize: 11, color: distColor }}>
+                  {distPct.toFixed(1)}%
+                </Text>
+              </>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
+}
+
+/* ── 테이블 안정 참조 (모듈 레벨) ─────────────────────── */
+
+const symbolRowClassName = (record: SymbolRow) => record.pos ? 'held-row' : '';
+const SYMBOL_TABLE_SCROLL = { x: 1200 } as const;
+
+/* ── SymbolTable (React.memo — 부모 re-render 격리) ──── */
+
+interface SymbolTableProps {
+  rows: SymbolRow[];
+  tickers: Map<string, TickerData>;
+  updatedAt: string | null;
+}
+
+const SymbolTable = memo(function SymbolTable({ rows, tickers, updatedAt }: SymbolTableProps) {
+  const columns = useMemo<ColumnsType<SymbolRow>>(
+    () => [...baseSymbolColumns, ...buildTickerColumns(tickers)],
+    [tickers]
+  );
+  return (
+    <Card
+      title={
+        <Space>
+          <FireOutlined style={{ color: '#fa541c' }} />
+          <span>거래대금 상위 종목</span>
+          {updatedAt && (
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
+              (갱신: {dayjs(updatedAt).format('HH:mm:ss')})
             </Text>
           )}
-        </Flex>
-      );
-    },
-  },
-  {
-    title: '수량',
-    dataIndex: 'pos',
-    width: 90,
-    align: 'right' as const,
-    render: (_: unknown, record: SymbolRow) =>
-      record.pos ? (
-        <Text style={{ fontSize: 12 }}>{record.pos.volume.toFixed(4)}</Text>
+        </Space>
+      }
+      variant="borderless"
+    >
+      {rows.length === 0 ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={
+            <Text type="secondary">봇 실행 후 거래대금 상위 종목이 표시됩니다</Text>
+          }
+          style={{ padding: 20 }}
+        />
       ) : (
-        <Text type="secondary" style={{ fontSize: 12 }}>-</Text>
-      ),
-  },
-  {
-    title: '투입금액',
-    dataIndex: 'pos',
-    width: 110,
-    align: 'right' as const,
-    render: (_: unknown, record: SymbolRow) =>
-      record.pos ? (
-        <Text style={{ fontSize: 12 }}>{Math.round(record.pos.amount).toLocaleString()}</Text>
-      ) : (
-        <Text type="secondary" style={{ fontSize: 12 }}>-</Text>
-      ),
-  },
-  {
-    title: '수익률',
-    width: 80,
-    align: 'right' as const,
-    render: (_: unknown, record: SymbolRow) => {
-      if (!record.pos) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
-      const currentPrice = record.ticker?.trade_price ?? record.snap?.price;
-      if (!currentPrice) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
-      const pnlPct = ((currentPrice - record.pos.entry_price) / record.pos.entry_price) * 100;
-      const color = pnlPct >= 0 ? COLOR_RISE : COLOR_FALL;
-      return (
-        <Text style={{ fontSize: 12, color, fontWeight: 600 }}>
-          {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
-        </Text>
-      );
-    },
-  },
-  {
-    title: '손절가',
-    width: 100,
-    align: 'right' as const,
-    render: (_: unknown, record: SymbolRow) => {
-      const sl = record.snap?.stop_loss;
-      if (!sl) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
-      return <Text style={{ fontSize: 12, color: COLOR_FALL }}>{Math.round(sl).toLocaleString()}</Text>;
-    },
-  },
-  {
-    title: '익절가',
-    width: 100,
-    align: 'right' as const,
-    render: (_: unknown, record: SymbolRow) => {
-      const tp = record.snap?.take_profit;
-      if (!tp) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
-      return <Text style={{ fontSize: 12, color: COLOR_RISE }}>{Math.round(tp).toLocaleString()}</Text>;
-    },
-  },
-];
+        <Table<SymbolRow>
+          dataSource={rows}
+          rowKey="key"
+          size="small"
+          pagination={false}
+          scroll={SYMBOL_TABLE_SCROLL}
+          rowClassName={symbolRowClassName}
+          columns={columns}
+        />
+      )}
+    </Card>
+  );
+});
 
 /* ── Dashboard Page ────────────────────────────────────── */
 
 export default function DashboardPage() {
   const [chartRange, setChartRange] = useState<string | number>('1h');
+  const [strategyEditOpen, setStrategyEditOpen] = useState(false);
+  const [currentStrategyParams, setCurrentStrategyParams] = useState<StrategyParams>({
+    bb_period: 20, bb_std_dev: 2.0, rsi_period: 14, rsi_oversold: 30,
+    atr_period: 14, atr_multiplier: 2.5,
+  });
+  const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [messageApi, contextHolder] = message.useMessage();
+
+  const handleOpenStrategyEdit = useCallback(async () => {
+    const params = await loadStrategyParams();
+    setCurrentStrategyParams(params);
+    setActivePreset(getActivePresetName(params));
+    setStrategyEditOpen(true);
+  }, []);
   const isHourly = chartRange === '1h' || chartRange === '1d';
   const balanceHours = chartRange === '1h' ? 1 : 24;
 
@@ -424,6 +571,13 @@ export default function DashboardPage() {
   const { stats: chartStats, loading: chartStatsLoading } = useDailyStats(isHourly ? 30 : (chartRange as number));
   const { stats: summaryStats } = useDailyStats(2); // Summary Cards용: 오늘 + 어제 (차트 기간과 독립)
   const { botState } = useBotState();
+
+  /* 활성 프리셋 — botState.strategy_params에서 파생 */
+  const strategyParamsRaw = botState?.strategy_params;
+  const displayPreset = useMemo(() => {
+    if (!strategyParamsRaw) return null;
+    return getActivePresetName(strategyParamsRaw as StrategyParams);
+  }, [strategyParamsRaw]);
   const { symbols: heldSymbols, loading: heldLoading } = useHeldSymbols();
   const { snapshots: balanceSnapshots, loading: balanceLoading } = useBalanceSnapshots(balanceHours);
   const { positions: heldPositions } = useHeldPositions(heldSymbols);
@@ -453,6 +607,7 @@ export default function DashboardPage() {
     return [...set];
   }, [topSymbols, heldSymbols]);
   const { tickers } = useUpbitTicker(allSymbols);
+  const deferredTickers = useDeferredValue(tickers);
 
   /* ── 요약 통계 — 총자산 변동 기준으로 통일 ────────────── */
   const todayStat = summaryStats.length > 0 ? summaryStats[summaryStats.length - 1] : null;
@@ -485,7 +640,6 @@ export default function DashboardPage() {
         indicators: parseInd(rawIndMap[symbol]),
         pos: heldPositions.get(symbol) ?? null,
         snap: latestSnapshots.get(symbol) ?? null,
-        ticker: tickers.get(symbol) ?? null,
       })),
       ...extraHeld.map((symbol) => ({
         key: symbol,
@@ -494,10 +648,9 @@ export default function DashboardPage() {
         indicators: parseInd(rawIndMap[symbol]),
         pos: heldPositions.get(symbol) ?? null,
         snap: latestSnapshots.get(symbol) ?? null,
-        ticker: tickers.get(symbol) ?? null,
       })),
     ];
-  }, [topSymbols, heldSymbols, rawIndMap, heldPositions, latestSnapshots, tickers]);
+  }, [topSymbols, heldSymbols, rawIndMap, heldPositions, latestSnapshots]);
 
   if (tradesLoading && chartStatsLoading) {
     return (
@@ -509,9 +662,23 @@ export default function DashboardPage() {
 
   return (
     <Flex vertical gap={24} style={{ width: '100%' }}>
-      <Title level={4} style={{ margin: 0 }}>
-        Dashboard
-      </Title>
+      {contextHolder}
+      <Flex justify="space-between" align="center">
+        <Flex align="center" gap={8}>
+          <Title level={4} style={{ margin: 0 }}>
+            Dashboard
+          </Title>
+          {displayPreset && (
+            <Tag color="blue" style={{ margin: 0 }}>{displayPreset}</Tag>
+          )}
+        </Flex>
+        <Button
+          icon={<EditOutlined />}
+          onClick={handleOpenStrategyEdit}
+        >
+          실시간 수정
+        </Button>
+      </Flex>
 
       {/* ── Summary Cards ── */}
       <Row gutter={[16, 16]}>
@@ -569,69 +736,7 @@ export default function DashboardPage() {
       </Row>
 
       {/* ── 거래대금 상위 종목 ── */}
-      <Card
-        title={
-          <Space>
-            <FireOutlined style={{ color: '#fa541c' }} />
-            <span>거래대금 상위 종목</span>
-            {botState?.updated_at && (
-              <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>
-                (갱신: {dayjs(botState.updated_at).format('HH:mm:ss')})
-              </Text>
-            )}
-          </Space>
-        }
-        variant="borderless"
-      >
-        {allRows.length === 0 ? (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={
-              <Text type="secondary">봇 실행 후 거래대금 상위 종목이 표시됩니다</Text>
-            }
-            style={{ padding: 20 }}
-          />
-        ) : (
-          <Table<SymbolRow>
-            dataSource={allRows}
-            rowKey="key"
-            size="small"
-            pagination={false}
-            scroll={{ x: 1200 }}
-            rowClassName={(record) => record.pos ? 'held-row' : ''}
-            columns={symbolTableColumns}
-          />
-        )}
-      </Card>
-
-      {/* ── 자산 성장 차트 ── */}
-      <Card
-        title="자산 성장 곡선"
-        variant="borderless"
-        loading={showChartSkeleton}
-        extra={
-          <Segmented
-            value={chartRange}
-            onChange={(v) => setChartRange(v as string | number)}
-            options={CHART_RANGES}
-            size="small"
-          />
-        }
-      >
-        {chartData.length > 0 ? (
-          <AssetGrowthChart data={chartData} chartRange={chartRange as '1h' | '1d' | 7 | 30} />
-        ) : (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={
-              <Text type="secondary">
-                봇 실행 후 자산 데이터가 자동으로 기록됩니다
-              </Text>
-            }
-            style={{ padding: 40 }}
-          />
-        )}
-      </Card>
+      <SymbolTable rows={allRows} tickers={deferredTickers} updatedAt={botState?.updated_at ?? null} />
 
       {/* ── 보유 종목 가격 & 손절선 (그리드) ── */}
       {heldLoading ? (
@@ -673,6 +778,48 @@ export default function DashboardPage() {
           loading={tradesLoading}
         />
       </Card>
+
+      {/* ── 자산 성장 차트 ── */}
+      <Card
+        title="자산 성장 곡선"
+        variant="borderless"
+        loading={showChartSkeleton}
+        extra={
+          <Segmented
+            value={chartRange}
+            onChange={(v) => setChartRange(v as string | number)}
+            options={CHART_RANGES}
+            size="small"
+          />
+        }
+      >
+        {chartData.length > 0 ? (
+          <AssetGrowthChart data={chartData} chartRange={chartRange as '1h' | '1d' | 7 | 30} />
+        ) : (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={
+              <Text type="secondary">
+                봇 실행 후 자산 데이터가 자동으로 기록됩니다
+              </Text>
+            }
+            style={{ padding: 40 }}
+          />
+        )}
+      </Card>
+      <StrategyEditModal
+        open={strategyEditOpen}
+        onClose={() => setStrategyEditOpen(false)}
+        currentParams={currentStrategyParams}
+        onApply={async (params: StrategyParams) => {
+          const ok = await saveStrategyParams(params);
+          if (ok) {
+            messageApi.success('전략 파라미터가 저장되었습니다. 약 1분 내 봇에 적용됩니다.');
+          } else {
+            messageApi.error('전략 파라미터 저장에 실패했습니다.');
+          }
+        }}
+      />
     </Flex>
   );
 }

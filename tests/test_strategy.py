@@ -19,6 +19,7 @@ def make_snapshot(
     rsi: float = 50.0,
     atr: float = 500.0,
     volatility_ratio: float = 1.0,
+    adx: float = 15.0,
 ) -> IndicatorSnapshot:
     return IndicatorSnapshot(
         bb=BollingerBands(
@@ -31,6 +32,7 @@ def make_snapshot(
         atr=atr,
         current_price=price,
         volatility_ratio=volatility_ratio,
+        adx=adx,
     )
 
 

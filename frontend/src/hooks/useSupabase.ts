@@ -75,7 +75,7 @@ export function useDailyStats(days = 30) {
  * @param date - 조회할 날짜 (YYYY-MM-DD). null이면 오늘 날짜.
  * @param limit - 최대 로그 수
  */
-export function useSystemLogs(date: string | null = null, limit = 500) {
+export function useSystemLogs(date: string | null = null, limit = 500, enabled = true) {
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -85,6 +85,8 @@ export function useSystemLogs(date: string | null = null, limit = 500) {
   const isToday = targetDate === dayjs().format('YYYY-MM-DD');
 
   useEffect(() => {
+    if (!enabled) { setLogs([]); setLoading(false); return; }
+
     (async () => {
       setLoading(true);
       const { data } = await supabase
@@ -99,7 +101,7 @@ export function useSystemLogs(date: string | null = null, limit = 500) {
     })();
 
     // 오늘 날짜일 때만 Realtime 구독 (과거 날짜는 새 로그가 안 들어옴)
-    if (!isToday) return;
+    if (!enabled || !isToday) return;
 
     const channel = supabase
       .channel('logs-realtime')
@@ -115,7 +117,7 @@ export function useSystemLogs(date: string | null = null, limit = 500) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [targetDate, startOfDay, endOfDay, isToday, limit]);
+  }, [targetDate, startOfDay, endOfDay, isToday, limit, enabled]);
 
   return { logs, loading };
 }

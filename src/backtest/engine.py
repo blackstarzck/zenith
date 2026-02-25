@@ -153,6 +153,9 @@ class BacktestEngine:
                     bb_std_dev=params.bb_std_dev,
                     rsi_period=params.rsi_period,
                     atr_period=params.atr_period,
+                    vol_short_window=params.vol_short_window,
+                    vol_long_window=params.vol_long_window,
+                    adx_period=params.adx_period,
                 )
             except (ValueError, Exception):
                 continue

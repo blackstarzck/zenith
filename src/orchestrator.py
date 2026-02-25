@@ -10,7 +10,7 @@ import logging
 import time
 from datetime import date, datetime
 
-from src.config import AppConfig
+from src.config import AppConfig, StrategyParams
 from src.collector.data_collector import UpbitCollector
 from src.strategy.indicators import compute_snapshot, calc_ma_trend, calc_rsi_slope, calc_bb_status
 from src.strategy.engine import MeanReversionEngine, Signal
@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 # 가격 스냅샷 저장 간격 (틱 수 기준, 10초 루프 × 18 = 약 3분)
 _SNAPSHOT_INTERVAL = 18
+
+# 전략 파라미터 핫리로드 간격 (틱 수 기준, 10초 루프 × 6 = 약 1분)
+_PARAM_RELOAD_INTERVAL = 6
 
 
 class Orchestrator:
@@ -52,6 +55,8 @@ class Orchestrator:
         self._loop_count = 0
         self._today: date = date.today()
         self._daily_report_sent: bool = False  # 당일 08:00 리포트 발송 여부
+        self._consecutive_errors: int = 0     # 연속 에러 횟수 (지수 백오프용)
+        self._max_backoff_sec: int = 300          # 최대 백오프 5분
 
     # ── 안전한 알림 래퍼 ───────────────────────────────────
 
@@ -76,6 +81,11 @@ class Orchestrator:
         # 초기 잔고로 리스크 매니저 초기화
         try:
             initial_balance = self._get_total_balance_krw()
+            # 네트워크 장애로 초기 잔고가 0이면 시작 불가
+            if initial_balance <= 0:
+                logger.critical('초기 자산 조회 실패: 잔고 0 — 네트워크 상태를 확인하세요')
+                self._safe_notify('notify_error', '봇 초기화 실패: 잔고 0 (네트워크 확인 필요)')
+                return
             self._risk = RiskManager(self._config.risk, initial_balance)
             logger.info("초기 자산: %.0f KRW", initial_balance)
             krw = self._collector.get_krw_balance()
@@ -107,16 +117,29 @@ class Orchestrator:
             while self._running:
                 try:
                     self._tick()
+                    # 성공 시 연속 에러 카운터 초기화
+                    if self._consecutive_errors > 0:
+                        logger.info("연속 에러 %d회 후 복구 완료", self._consecutive_errors)
+                        self._consecutive_errors = 0
+                    time.sleep(self._config.loop_interval_sec)
                 except KeyboardInterrupt:
                     logger.info("사용자 종료 요청")
                     self._running = False
                 except Exception:
-                    logger.exception("메인 루프 오류")
-                    # 알림 실패가 봇을 죽이지 않도록 안전 래퍼 사용
-                    self._safe_notify("notify_error", "메인 루프 오류 발생 — 로그를 확인하세요.")
-
-                if self._running:
-                    time.sleep(self._config.loop_interval_sec)
+                    self._consecutive_errors += 1
+                    logger.exception(
+                        "메인 루프 오류 (연속 %d회)", self._consecutive_errors
+                    )
+                    # 최초 1회만 알림 (연속 에러 시 알림 폭탄 방지)
+                    if self._consecutive_errors == 1:
+                        self._safe_notify("notify_error", "메인 루프 오류 발생 — 로그를 확인하세요.")
+                    # 지수 백오프 (10s, 20s, 40s, ... 최대 300s)
+                    backoff = min(
+                        self._config.loop_interval_sec * (2 ** self._consecutive_errors),
+                        self._max_backoff_sec,
+                    )
+                    logger.info("백오프 대기: %d초", backoff)
+                    time.sleep(backoff)
         finally:
             # 리소스 정리 (HTTP 클라이언트 등)
             self._storage.upsert_bot_state(is_active=False)
@@ -134,6 +157,10 @@ class Orchestrator:
         """1회 매매 사이클을 실행합니다."""
         self._loop_count += 1
         self._check_daily_reset()
+
+        # 0. 전략 파라미터 핫리로드 (약 1분마다)
+        if self._loop_count % _PARAM_RELOAD_INTERVAL == 0:
+            self._reload_strategy_params()
 
         if self._risk.is_daily_stopped:
             if self._loop_count % 60 == 1:  # 10분에 1번만 로그
@@ -216,6 +243,9 @@ class Orchestrator:
                     bb_std_dev=self._config.strategy.bb_std_dev,
                     rsi_period=self._config.strategy.rsi_period,
                     atr_period=self._config.strategy.atr_period,
+                    vol_short_window=self._config.strategy.vol_short_window,
+                    vol_long_window=self._config.strategy.vol_long_window,
+                    adx_period=self._config.strategy.adx_period,
                 )
 
                 signal = self._strategy.evaluate_exit(
@@ -232,6 +262,8 @@ class Orchestrator:
                 # Rate limit 방어
                 time.sleep(0.2)
 
+            except ValueError as e:
+                logger.debug("청산 평가 건너뜀 [%s]: %s", symbol, e)
             except Exception as e:
                 logger.error("청산 평가 오류 [%s]: %s", symbol, e)
 
@@ -239,9 +271,15 @@ class Orchestrator:
 
     def _evaluate_entries(self) -> None:
         """미보유 종목의 진입 조건을 평가합니다."""
-        current_balance = self._get_total_balance_krw()
-        krw = self._collector.get_krw_balance()
-        self._storage.upsert_bot_state(current_balance=current_balance, krw_balance=krw)
+        try:
+            current_balance = self._get_total_balance_krw()
+            krw = self._collector.get_krw_balance()
+        except Exception as e:
+            logger.error("잔고 조회 실패 — 진입 평가 건너뜀: %s", e)
+            return
+        # 네트워크 장애로 잔고가 0으로 조회되면 DB에 기록하지 않음 (대시보드 0 표시 방지)
+        if current_balance > 0 or krw > 0:
+            self._storage.upsert_bot_state(current_balance=current_balance, krw_balance=krw)
 
         symbol_indicators: dict[str, dict] = {}
 
@@ -261,6 +299,9 @@ class Orchestrator:
                     bb_std_dev=self._config.strategy.bb_std_dev,
                     rsi_period=self._config.strategy.rsi_period,
                     atr_period=self._config.strategy.atr_period,
+                    vol_short_window=self._config.strategy.vol_short_window,
+                    vol_long_window=self._config.strategy.vol_long_window,
+                    adx_period=self._config.strategy.adx_period,
                 )
 
                 closes = df["close"]
@@ -270,7 +311,7 @@ class Orchestrator:
                 vol = round(snapshot.volatility_ratio, 2)
 
                 # 2) 추세 (MA20 > MA50)
-                trend = calc_ma_trend(closes, short_period=20, long_period=50)
+                trend = calc_ma_trend(closes, short_period=self._config.strategy.ma_short_period, long_period=self._config.strategy.ma_long_period)
                 # True/False/None → "up"/"down"/"unknown"
                 trend_str = "up" if trend is True else ("down" if trend is False else "unknown")
 
@@ -285,7 +326,7 @@ class Orchestrator:
                 # 4) RSI 값 + 기울기
                 rsi_val = round(snapshot.rsi, 1)
                 rsi_slope = round(
-                    calc_rsi_slope(closes, self._config.strategy.rsi_period, lookback=3),
+                    calc_rsi_slope(closes, self._config.strategy.rsi_period, lookback=self._config.strategy.rsi_slope_lookback),
                     2,
                 )
 
@@ -318,6 +359,8 @@ class Orchestrator:
 
                 time.sleep(0.2)
 
+            except ValueError as e:
+                logger.debug("진입 평가 건너뜀 [%s]: %s", symbol, e)
             except Exception as e:
                 logger.error("진입 평가 오류 [%s]: %s", symbol, e)
 
@@ -351,6 +394,9 @@ class Orchestrator:
                     bb_std_dev=params.bb_std_dev,
                     rsi_period=params.rsi_period,
                     atr_period=params.atr_period,
+                    vol_short_window=params.vol_short_window,
+                    vol_long_window=params.vol_long_window,
+                    adx_period=params.adx_period,
                 )
 
                 price = snapshot.current_price
@@ -508,6 +554,35 @@ class Orchestrator:
         if self._risk.is_daily_stopped:
             self._safe_notify("notify_daily_stop", self._risk.daily_realized_pnl)
 
+    # ── 전략 파라미터 핫리로드 ─────────────────────────────────
+
+    def _reload_strategy_params(self) -> None:
+        """DB에서 전략 파라미터를 읽어 엔진에 반영합니다.
+
+        프론트엔드에서 bot_state.strategy_params에 저장한 값을
+        약 1분 간격으로 폴링하여 MeanReversionEngine에 핫리로드합니다.
+        DB에 값이 없으면 (None) 아무 것도 하지 않습니다.
+        """
+        try:
+            saved = self._storage.get_strategy_params()
+            if saved is None:
+                return
+            new_params = StrategyParams.from_dict(saved)
+            if new_params != self._config.strategy:
+                self._config = AppConfig(
+                    upbit=self._config.upbit,
+                    supabase=self._config.supabase,
+                    kakao=self._config.kakao,
+                    strategy=new_params,
+                    risk=self._config.risk,
+                    loop_interval_sec=self._config.loop_interval_sec,
+                    candle_interval=self._config.candle_interval,
+                    candle_count=self._config.candle_count,
+                )
+                self._strategy.update_params(new_params)
+                logger.info("전략 파라미터 핫리로드 완료: %s", saved)
+        except Exception:
+            logger.warning("전략 파라미터 핫리로드 실패 — 기존 값 유지")
     # ── 유틸리티 ─────────────────────────────────────────────
 
     def _sync_existing_positions(self) -> None:
@@ -629,39 +704,45 @@ class Orchestrator:
             try:
                 balance = self._get_total_balance_krw()
 
-                # 1) 전일 최종 stats 확정 (self._today는 아직 어제)
-                self._storage.upsert_daily_stats(
-                    stats_date=self._today,
-                    total_balance=balance,
-                    net_profit=self._risk.daily_realized_pnl,
-                    drawdown=0.0,  # TODO: MDD 계산 추가
-                )
-
-                # 1-1) 일일 분석 리포트 생성 (날짜 전환 전에 실행)
-                try:
-                    generate_daily_report(
-                        storage=self._storage,
-                        report_date=self._today,
+                # 네트워크 장애로 잔고가 0으로 조회되면 stats/리포트 기록 건너뜀
+                if balance > 0:
+                    # 1) 전일 최종 stats 확정 (self._today는 아직 어제)
+                    self._storage.upsert_daily_stats(
+                        stats_date=self._today,
                         total_balance=balance,
                         net_profit=self._risk.daily_realized_pnl,
-                        initial_balance=self._risk._initial_balance,
+                        drawdown=0.0,  # TODO: MDD 계산 추가
                     )
-                    logger.info("일일 분석 리포트 생성 완료: %s", self._today)
-                except Exception as e:
-                    logger.error("일일 분석 리포트 생성 실패: %s", e)
+
+                    # 1-1) 일일 분석 리포트 생성 (날짜 전환 전에 실행)
+                    try:
+                        generate_daily_report(
+                            storage=self._storage,
+                            report_date=self._today,
+                            total_balance=balance,
+                            net_profit=self._risk.daily_realized_pnl,
+                            initial_balance=self._risk._initial_balance,
+                        )
+                        logger.info("일일 분석 리포트 생성 완료: %s", self._today)
+                    except Exception as e:
+                        logger.error("일일 분석 리포트 생성 실패: %s", e)
+                else:
+                    logger.warning("네트워크 장애 추정: 잔고 0 조회 — 전일 통계/리포트 기록 건너뜀")
 
                 # 2) 날짜 전환 + 리스크 매니저 리셋 (PnL 0, 초기 잔고 갱신)
                 self._today = today
-                self._risk.reset_daily(balance)
+                if balance > 0:
+                    self._risk.reset_daily(balance)
                 self._daily_report_sent = False
 
-                # 3) 금일 stats 초기 행 삽입 (net_profit=0)
-                self._storage.upsert_daily_stats(
-                    stats_date=self._today,
-                    total_balance=balance,
-                    net_profit=0.0,
-                    drawdown=0.0,
-                )
+                # 3) 금일 stats 초기 행 삽입 (net_profit=0) — 잔고 유효할 때만
+                if balance > 0:
+                    self._storage.upsert_daily_stats(
+                        stats_date=self._today,
+                        total_balance=balance,
+                        net_profit=0.0,
+                        drawdown=0.0,
+                    )
             except Exception as e:
                 logger.error("일일 통계 저장/리셋 실패: %s", e)
                 # 날짜 전환은 반드시 수행 (다음 틱에서 무한 반복 방지)

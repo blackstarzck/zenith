@@ -1,16 +1,18 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ConfigProvider, theme } from 'antd';
+import { ConfigProvider, theme, Spin } from 'antd';
 import koKR from 'antd/locale/ko_KR';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { RecoveryProvider } from './hooks/useRecoverySignal';
 import AppLayout from './components/AppLayout';
-import DashboardPage from './pages/DashboardPage';
-import TradingPage from './pages/TradingPage';
-import AnalyticsPage from './pages/AnalyticsPage';
-import SettingsPage from './pages/SettingsPage';
-import ReportsPage from './pages/ReportsPage';
 import LoginPage from './pages/LoginPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
-import type { ReactNode } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
+
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const TradingPage = lazy(() => import('./pages/TradingPage'));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 
 /* ── Auth Guard ─────────────────────────────────────────── */
 
@@ -40,31 +42,39 @@ export default function App() {
       }}
     >
       <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            {/* Public routes */}
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/auth/callback" element={<AuthCallbackPage />} />
+        <RecoveryProvider>
+          <BrowserRouter>
+            <Routes>
+              {/* Public routes */}
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/auth/callback" element={<AuthCallbackPage />} />
 
-            {/* Protected routes */}
-            <Route
-              element={
-                <RequireAuth>
-                  <AppLayout />
-                </RequireAuth>
-              }
-            >
-              <Route index element={<DashboardPage />} />
-              <Route path="trading" element={<TradingPage />} />
-              <Route path="analytics" element={<AnalyticsPage />} />
-              <Route path="settings" element={<SettingsPage />} />
-              <Route path="reports" element={<ReportsPage />} />
-            </Route>
+              {/* Protected routes */}
+              <Route
+                element={
+                  <RequireAuth>
+                    <Suspense fallback={
+                      <div style={{ textAlign: 'center', padding: 80 }}>
+                        <Spin size="large" />
+                      </div>
+                    }>
+                      <AppLayout />
+                    </Suspense>
+                  </RequireAuth>
+                }
+              >
+                <Route index element={<DashboardPage />} />
+                <Route path="trading" element={<TradingPage />} />
+                <Route path="analytics" element={<AnalyticsPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+                <Route path="reports" element={<ReportsPage />} />
+              </Route>
 
-            {/* Fallback */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </BrowserRouter>
+              {/* Fallback */}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </BrowserRouter>
+        </RecoveryProvider>
       </AuthProvider>
     </ConfigProvider>
   );

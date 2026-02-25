@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from supabase import create_client, Client
+from supabase.lib.client_options import SyncClientOptions
 
 from src.config import SupabaseConfig
 
@@ -27,7 +28,11 @@ class StorageClient:
     def __init__(self, config: SupabaseConfig) -> None:
         if not config.url or not config.secret_key:
             raise ValueError("SUPABASE_URL 및 SUPABASE_SECRET_KEY가 필요합니다.")
-        self._client: Client = create_client(config.url, config.secret_key)
+        options = SyncClientOptions(
+            postgrest_client_timeout=30,
+            storage_client_timeout=30,
+        )
+        self._client: Client = create_client(config.url, config.secret_key, options)
 
     # ── trades ───────────────────────────────────────────────
 
@@ -192,13 +197,14 @@ class StorageClient:
         upbit_status: str | None = None,
         kakao_status: str | None = None,
     ) -> None:
+        strategy_params: dict | None = None,
         """봇 실시간 상태를 갱신합니다 (단일 행 upsert).
 
         전달된 필드만 업데이트합니다.
         """
         row: dict[str, Any] = {
             "id": 1,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat() + "Z",
         }
         if initial_balance is not None:
             row["initial_balance"] = initial_balance
@@ -216,6 +222,8 @@ class StorageClient:
             row["upbit_status"] = upbit_status
         if kakao_status is not None:
             row["kakao_status"] = kakao_status
+        if strategy_params is not None:
+            row["strategy_params"] = strategy_params
         try:
             self._client.table("bot_state").upsert(
                 row, on_conflict="id"
@@ -237,6 +245,21 @@ class StorageClient:
         except Exception:
             logger.exception("봇 상태 조회 실패")
             return None
+
+    def get_strategy_params(self) -> dict | None:
+        """bot_state에서 strategy_params를 조회합니다.
+
+        Returns:
+            전략 파라미터 딕셔너리 (미설정 시 None)
+        """
+        state = self.get_bot_state()
+        if state and state.get("strategy_params"):
+            return state["strategy_params"]
+        return None
+
+    def save_strategy_params(self, params_dict: dict) -> None:
+        """전략 파라미터를 bot_state에 저장합니다."""
+        self.upsert_bot_state(strategy_params=params_dict)
 
     # ── kakao_tokens ─────────────────────────────────────────
 
