@@ -61,7 +61,7 @@ export default function ManualOverrideModal({
         <Button onClick={onClose}>닫기</Button>
       }
       width={500}
-      destroyOnClose
+      destroyOnHidden
     >
       {/* Bot control */}
       <Alert

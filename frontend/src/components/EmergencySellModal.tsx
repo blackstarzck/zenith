@@ -93,7 +93,7 @@ export default function EmergencySellModal({ open, onClose, position }: Props) {
         body: { paddingTop: 16 },
       }}
       width={480}
-      destroyOnClose
+      destroyOnHidden
     >
       <Alert
         title="시장가 매도가 즉시 실행됩니다. 이 작업은 되돌릴 수 없습니다."

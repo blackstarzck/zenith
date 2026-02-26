@@ -196,8 +196,8 @@ class StorageClient:
         is_active: bool | None = None,
         upbit_status: str | None = None,
         kakao_status: str | None = None,
-    ) -> None:
         strategy_params: dict | None = None,
+    ) -> None:
         """봇 실시간 상태를 갱신합니다 (단일 행 upsert).
 
         전달된 필드만 업데이트합니다.

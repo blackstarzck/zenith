@@ -47,10 +47,9 @@ export default function SettingsPage() {
     setLoadingParams(true);
     const params = await loadStrategyParams();
     setLoadedParams(params);
-    strategyForm.setFieldsValue(params);
     setActivePreset(getActivePresetName(params));
     setLoadingParams(false);
-  }, [strategyForm]);
+  }, []);
 
   useEffect(() => {
     loadParams();
