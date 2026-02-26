@@ -7,7 +7,7 @@
       "request": "launch",
       "module": "main",
       "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
+      "envFile": "${workspaceFolder}/.env.backend",
       "console": "integratedTerminal",
       "justMyCode": true
     },
@@ -32,7 +32,7 @@
       "request": "launch",
       "program": "${workspaceFolder}/scripts/preflight_check.py",
       "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
+      "envFile": "${workspaceFolder}/.env.backend",
       "console": "integratedTerminal",
       "justMyCode": true
     },
@@ -42,7 +42,7 @@
       "request": "launch",
       "program": "${workspaceFolder}/scripts/kakao_auth.py",
       "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
+      "envFile": "${workspaceFolder}/.env.backend",
       "console": "integratedTerminal",
       "justMyCode": true
     },
@@ -52,7 +52,7 @@
       "request": "launch",
       "module": "src.backtest.engine",
       "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
+      "envFile": "${workspaceFolder}/.env.backend",
       "console": "integratedTerminal",
       "justMyCode": true
     },
@@ -62,7 +62,7 @@
       "request": "launch",
       "module": "src.backtest.paper_trading",
       "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
+      "envFile": "${workspaceFolder}/.env.backend",
       "console": "integratedTerminal",
       "justMyCode": true
     },
@@ -73,7 +73,7 @@
       "module": "pytest",
       "args": ["tests/", "-v"],
       "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/.env",
+      "envFile": "${workspaceFolder}/.env.backend",
       "console": "integratedTerminal",
       "justMyCode": true
     }

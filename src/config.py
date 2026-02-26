@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass, field, asdict, fields as dc_fields
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(".env.backend")
 
 
 @dataclass(frozen=True)
