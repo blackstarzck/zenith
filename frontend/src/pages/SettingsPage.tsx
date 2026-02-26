@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Card,
   Form,
@@ -13,7 +13,6 @@ import {
   message,
   Descriptions,
   Alert,
-  Tag,
 } from 'antd';
 import {
   ApiOutlined,
@@ -25,7 +24,6 @@ import {
 import type { StrategyParams } from '../components/StrategyEditModal';
 import { loadStrategyParams, saveStrategyParams, DEFAULT_STRATEGY, PRESETS, getActivePresetName } from '../lib/strategyParams';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 
 const { Title, Text } = Typography;
 

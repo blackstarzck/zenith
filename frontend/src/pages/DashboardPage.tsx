@@ -555,7 +555,7 @@ export default function DashboardPage() {
     bb_period: 20, bb_std_dev: 2.0, rsi_period: 14, rsi_oversold: 30,
     atr_period: 14, atr_multiplier: 2.5,
   });
-  const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [, setActivePreset] = useState<string | null>(null);
   const [messageApi, contextHolder] = message.useMessage();
 
   const handleOpenStrategyEdit = useCallback(async () => {
@@ -576,7 +576,7 @@ export default function DashboardPage() {
   const strategyParamsRaw = botState?.strategy_params;
   const displayPreset = useMemo(() => {
     if (!strategyParamsRaw) return null;
-    return getActivePresetName(strategyParamsRaw as StrategyParams);
+    return getActivePresetName(strategyParamsRaw as unknown as StrategyParams);
   }, [strategyParamsRaw]);
   const { symbols: heldSymbols, loading: heldLoading } = useHeldSymbols();
   const { snapshots: balanceSnapshots, loading: balanceLoading } = useBalanceSnapshots(balanceHours);
