@@ -22,12 +22,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import httpx
 from dotenv import load_dotenv, set_key
 
-load_dotenv()
+load_dotenv(".env.backend")
 
 KAKAO_AUTH_URL = "https://kauth.kakao.com/oauth/authorize"
 KAKAO_TOKEN_URL = "https://kauth.kakao.com/oauth/token"
 REDIRECT_URI = "http://localhost:5000/callback"
-ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.backend")
 
 # 토큰 저장용 전역 변수
 _token_result: dict | None = None
