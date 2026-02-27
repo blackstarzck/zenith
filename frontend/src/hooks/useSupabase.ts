@@ -219,8 +219,10 @@ export function usePriceSnapshots(symbol: string | null, limit = 120) {
 
 /**
  * 현재 보유 중인 종목 목록을 반환합니다.
- * 오케스트레이터는 보유 종목에 대해서만 price_snapshots를 저장하므로,
- * 최근 1시간 내 스냅샷이 있는 종목 = 현재 보유 종목입니다.
+ *
+ * 1차: price_snapshots (최근 1시간 내 스냅샷 존재 = 보유 후보)
+ * 2차: trades 테이블에서 각 후보의 최신 거래를 확인하여 전량 매도된 종목을 제외
+ * 실시간: trades INSERT 구독으로 매수/매도 즉시 반영
  */
 export function useHeldSymbols() {
   const [symbols, setSymbols] = useState<string[]>([]);
@@ -229,17 +231,46 @@ export function useHeldSymbols() {
   useEffect(() => {
     (async () => {
       setLoading(true);
+
+      // 1. price_snapshots에서 최근 1시간 내 종목 후보 추출
       const since = dayjs().subtract(1, 'hour').toISOString();
-      const { data } = await supabase
+      const { data: snapData } = await supabase
         .from('price_snapshots')
         .select('symbol')
         .gte('created_at', since);
-      const unique = [...new Set((data ?? []).map((d: { symbol: string }) => d.symbol))].sort();
-      setSymbols(unique);
+      const candidates = [...new Set((snapData ?? []).map((d: { symbol: string }) => d.symbol))];
+
+      // 2. 후보 종목의 최신 거래를 확인하여 전량 매도 종목 제외
+      let held = candidates;
+      if (candidates.length > 0) {
+        const { data: tradeData } = await supabase
+          .from('trades')
+          .select('symbol, side, remaining_volume')
+          .in('symbol', candidates)
+          .order('created_at', { ascending: false });
+
+        const latestBySymbol = new Map<string, { side: string; remaining_volume: number | null }>();
+        for (const t of (tradeData ?? []) as Array<{ symbol: string; side: string; remaining_volume: number | null }>) {
+          if (!latestBySymbol.has(t.symbol)) {
+            latestBySymbol.set(t.symbol, { side: t.side, remaining_volume: t.remaining_volume });
+          }
+        }
+
+        held = candidates.filter((sym) => {
+          const latest = latestBySymbol.get(sym);
+          // 최신 거래가 전량 매도(remaining_volume ≤ 0)이면 보유 아님
+          if (latest && latest.side === 'ask' && latest.remaining_volume != null && latest.remaining_volume <= 0) {
+            return false;
+          }
+          return true;
+        });
+      }
+
+      setSymbols(held.sort());
       setLoading(false);
     })();
 
-    // 새 스냅샷 도착 시 종목 목록 갱신
+    // 실시간: price_snapshots INSERT + trades INSERT 구독
     const channel = supabase
       .channel('held-symbols-realtime')
       .on(
@@ -251,6 +282,23 @@ export function useHeldSymbols() {
             if (prev.includes(sym)) return prev;
             return [...prev, sym].sort();
           });
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'trades' },
+        (payload) => {
+          const trade = payload.new as Trade;
+          if (trade.side === 'bid') {
+            // 매수 → 즉시 보유 목록에 추가
+            setSymbols((prev) => {
+              if (prev.includes(trade.symbol)) return prev;
+              return [...prev, trade.symbol].sort();
+            });
+          } else if (trade.side === 'ask' && trade.remaining_volume != null && trade.remaining_volume <= 0) {
+            // 전량 매도 → 즉시 보유 목록에서 제거
+            setSymbols((prev) => prev.filter((s) => s !== trade.symbol));
+          }
         },
       )
       .subscribe();
@@ -290,7 +338,7 @@ export function useBalanceSnapshots(hours = 24) {
 
 /**
  * 현재 보유 중인 종목의 포지션 정보(매수가, 수량, 투입금액)를 반환합니다.
- * 각 종목의 가장 최근 매수(bid) 거래를 기준으로 합니다.
+ * 종목별 최신 거래를 확인하여 전량 매도된 종목은 제외합니다.
  */
 export function useHeldPositions(heldSymbols: string[]) {
   const [positions, setPositions] = useState<Map<string, HeldPosition>>(new Map());
@@ -310,21 +358,32 @@ export function useHeldPositions(heldSymbols: string[]) {
         .from('trades')
         .select('*')
         .in('symbol', heldSymbols)
-        .eq('side', 'bid')
         .order('created_at', { ascending: false });
 
       const posMap = new Map<string, HeldPosition>();
+      const fullyLiquidated = new Set<string>();
+
       for (const trade of (data as Trade[]) ?? []) {
-        // 종목당 가장 최근 매수 거래만 사용
-        if (!posMap.has(trade.symbol)) {
-          posMap.set(trade.symbol, {
-            symbol: trade.symbol,
-            entry_price: trade.price,
-            volume: trade.volume,
-            amount: trade.amount,
-            created_at: trade.created_at,
-          });
+        // 이미 처리된 종목은 스킵
+        if (posMap.has(trade.symbol) || fullyLiquidated.has(trade.symbol)) continue;
+
+        if (trade.side === 'ask') {
+          if (trade.remaining_volume != null && trade.remaining_volume <= 0) {
+            // 전량 매도 완료 → 보유 아님
+            fullyLiquidated.add(trade.symbol);
+          }
+          // 부분 매도(remaining > 0)는 스킵하고 아래의 bid를 탐색
+          continue;
         }
+
+        // bid → 매수 포지션 등록
+        posMap.set(trade.symbol, {
+          symbol: trade.symbol,
+          entry_price: trade.price,
+          volume: trade.volume,
+          amount: trade.amount,
+          created_at: trade.created_at,
+        });
       }
       setPositions(posMap);
       setLoading(false);
