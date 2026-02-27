@@ -207,7 +207,7 @@ export default function SettingsPage() {
                   </Form.Item>
                 </Col>
                 <Col span={12}>
-                  <Form.Item label="손절 계수" name="atr_multiplier">
+                  <Form.Item label="손절 계수" name="atr_stop_multiplier">
                     <InputNumber
                       min={1}
                       max={5}
@@ -221,7 +221,7 @@ export default function SettingsPage() {
               <Divider titlePlacement="left" plain>
                 기타
               </Divider>
-              <Form.Item label="거래 대금 상위 종목 수" name="top_volume">
+              <Form.Item label="거래 대금 상위 종목 수" name="top_volume_count">
                 <InputNumber min={3} max={30} style={{ width: '100%' }} />
               </Form.Item>
 

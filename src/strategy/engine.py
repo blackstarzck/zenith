@@ -101,6 +101,15 @@ class MeanReversionEngine:
                     price=price,
                 )
 
+        # ── 1.75단계: ADX 추세 강도 필터 ──
+        if snapshot.adx > params.adx_trend_threshold:
+            return TradeSignal(
+                signal=Signal.HOLD,
+                symbol=symbol,
+                reason=f"강한 추세 감지 (ADX={snapshot.adx:.1f} > {params.adx_trend_threshold}) — 평균 회귀 부적합",
+                price=price,
+            )
+
         # ── 2단계: BB 하단 이탈 후 복귀 확인 ──
         was_below = self._was_below_lower.get(symbol, False)
         currently_below = price < bb.lower
@@ -133,7 +142,7 @@ class MeanReversionEngine:
             rsi_slope = calc_rsi_slope(closes_series, params.rsi_period, lookback=params.rsi_slope_lookback)
             rsi_rising = rsi_slope > 0
 
-        if rsi > params.rsi_oversold and not rsi_rising:
+        if not rsi_rising:
             return TradeSignal(
                 signal=Signal.HOLD,
                 symbol=symbol,

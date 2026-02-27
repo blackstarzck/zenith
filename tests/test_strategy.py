@@ -132,6 +132,32 @@ class TestEntrySignals:
         )
         assert signal.signal == Signal.HOLD
 
+    def test_adx_strong_trend_blocks_entry(self):
+        """ADX가 추세 임계치 초과 시 평균 회귀 진입 차단."""
+        engine = make_engine()
+
+        # 하단 이탈 기록
+        engine.evaluate_entry("KRW-BTC", make_snapshot(price=47000, bb_lower=48000))
+
+        # 복귀 + RSI 과매도이지만 ADX가 높음 (강한 추세)
+        snap = make_snapshot(price=48500, bb_lower=48000, rsi=25, adx=30.0)
+        signal = engine.evaluate_entry("KRW-BTC", snap)
+
+        assert signal.signal == Signal.HOLD
+        assert "ADX" in signal.reason
+
+    def test_adx_weak_trend_allows_entry(self):
+        """ADX가 낮으면 (횡보) 평균 회귀 진입 허용."""
+        engine = make_engine()
+
+        # 하단 이탈 기록
+        engine.evaluate_entry("KRW-BTC", make_snapshot(price=47000, bb_lower=48000))
+
+        # 복귀 + RSI 과매도 + ADX 낮음 (횡보장)
+        snap = make_snapshot(price=48500, bb_lower=48000, rsi=25, adx=15.0)
+        signal = engine.evaluate_entry("KRW-BTC", snap)
+
+        assert signal.signal == Signal.BUY
 
 # ── 청산 조건 테스트 ─────────────────────────────────────────
 

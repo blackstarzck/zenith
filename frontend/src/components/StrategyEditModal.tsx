@@ -23,8 +23,8 @@ export interface StrategyParams {
   rsi_period: number;
   rsi_oversold: number;
   atr_period: number;
-  atr_multiplier: number;
-  top_volume?: number;
+  atr_stop_multiplier: number;
+  top_volume_count?: number;
 }
 
 
@@ -58,7 +58,7 @@ export default function StrategyEditModal({
 
   const handleApply = () => {
     const values = form.getFieldsValue();
-    // top_volume은 모달 폼에 없으므로 currentParams에서 보존
+    // top_volume_count는 모달 폼에 없으므로 currentParams에서 보존
     onApply({ ...currentParams, ...values });
     onClose();
   };
@@ -137,7 +137,7 @@ export default function StrategyEditModal({
             </Form.Item>
           </Col>
           <Col span={12}>
-            <Form.Item label="손절 계수" name="atr_multiplier">
+            <Form.Item label="손절 계수" name="atr_stop_multiplier">
               <InputNumber min={1} max={5} step={0.1} style={{ width: '100%' }} />
             </Form.Item>
           </Col>
