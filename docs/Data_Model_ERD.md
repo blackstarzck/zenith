@@ -14,6 +14,7 @@
 - **volume**: DECIMAL (체결 수량)
 - **amount**: DECIMAL (총 거래 금액)
 - **fee**: DECIMAL (수수료)
+- **slippage**: DECIMAL | NULL (예상 슬리피지 bps, 매수 거래만 기록)
 - **created_at**: TIMESTAMP (거래 시간)
 
 ### 2.2 daily_stats (일별 성과 지표)
@@ -29,6 +30,22 @@
 - **level**: VARCHAR (INFO, WARNING, ERROR)
 - **message**: TEXT (로그 내용)
 - **created_at**: TIMESTAMP
+### 2.4 bot_state (봇 실시간 상태)
+봇의 현재 운영 상태를 단일 행으로 관리합니다.
+- **id**: INTEGER (PK, 항상 1)
+- **initial_balance**: DECIMAL (초기 자산)
+- **current_balance**: DECIMAL (현재 자산)
+- **krw_balance**: DECIMAL (KRW 잔고)
+- **top_symbols**: JSONB (감시 종목 목록)
+- **symbol_volatilities**: JSONB (종목별 지표)
+- **is_active**: BOOLEAN (봇 활성 여부)
+- **upbit_status**: VARCHAR (업비트 연결 상태)
+- **kakao_status**: VARCHAR (카카오 연결 상태)
+- **strategy_params**: JSONB (전략 파라미터)
+- **market_regime**: TEXT (시장 레짐 상태 — trending/ranging/volatile, 기본값 'ranging')
+- **kelly_fraction**: DECIMAL | NULL (현재 켈리 비중 0.0~1.0, 데이터 부족 시 NULL)
+- **updated_at**: TIMESTAMP
+
 
 ## 3. 데이터 보존 정책
 - **거래 기록**: 영구 보존 (수익 분석용)

@@ -9,6 +9,7 @@ export interface Trade {
   amount: number;
   fee: number;
   pnl: number | null;
+  slippage: number | null;  // 예상 슬리피지 (bps), 매도 거래는 null
   remaining_volume: number | null;
   reason: string | null;
   created_at: string;
@@ -51,6 +52,8 @@ export interface BotState {
   upbit_status: UpbitStatus;
   kakao_status: KakaoStatus;
   strategy_params: Record<string, number> | null;
+  market_regime: 'trending' | 'ranging' | 'volatile' | null;
+  kelly_fraction: number | null;  // 켈리 비중 (0.0~1.0), null이면 고정비율
   updated_at: string;
 }
 

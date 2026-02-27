@@ -16,9 +16,12 @@
 ## 3. 계층별 구조
 ### 3.1 데이터 수집부 (Data Collector)
 - **Upbit API Interface:** REST API 및 WebSocket을 통한 실시간 데이터 수집.
+- **Slippage Estimator:** 호가창 데이터를 분석하여 시장가 주문 시 예상 체결 가격(Slippage)을 산출.
 
 ### 3.2 전략 연산부 (Strategy Engine)
 - **Mean Reversion Logic:** 볼린저 밴드 및 RSI 기반 알고리즘 연산.
+- **Market Regime Detector (`strategy/regime.py`):** BTC-KRW 기반 시장 레짐 감지 (trending/ranging/volatile). 10분마다 판단하여 orchestrator에서 진입 필터로 사용.
+- **Risk Manager (`risk/manager.py`):** 켈리 공식(Kelly Criterion)을 활용한 동적 포지션 사이징 및 진입 전 슬리피지 임계치 검증.
 
 ### 3.3 주문 및 알림부 (Action Layer)
 - **Order Executor:** 매매 주문 집행 및 KakaoTalk 알림 전송.
@@ -32,6 +35,7 @@
 ## 4. 데이터 흐름
 1. [Upbit] -> 시세 데이터 수집 -> [Python Engine]
 2. [Python Engine] -> 전략 연산 -> 매매 신호 생성
-3. [Python Engine] -> [Upbit] 주문 전송 & [Supabase] 기록 저장
-4. [Supabase] -> **[React/AntD Dashboard]** 실시간 데이터 시각화
-5. [Python Engine] -> [KakaoTalk] 매매 결과 알림 전송
+3. [Python Engine] -> **[Risk Manager]** 켈리 비중 산출 및 슬리피지 검증
+4. [Python Engine] -> [Upbit] 주문 전송 & [Supabase] 기록 저장
+5. [Supabase] -> **[React/AntD Dashboard]** 실시간 데이터 시각화
+6. [Python Engine] -> [KakaoTalk] 매매 결과 알림 전송

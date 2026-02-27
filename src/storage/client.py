@@ -47,6 +47,7 @@ class StorageClient:
         pnl: float | None = None,
         remaining_volume: float | None = None,
         reason: str | None = None,
+        slippage: float | None = None,
     ) -> dict[str, Any]:
         """매매 체결 내역을 기록합니다."""
         row = {
@@ -64,6 +65,8 @@ class StorageClient:
             row["remaining_volume"] = remaining_volume
         if reason is not None:
             row["reason"] = reason
+        if slippage is not None:
+            row["slippage"] = round(slippage, 4)
 
         try:
             result = self._client.table("trades").insert(row).execute()
@@ -88,6 +91,27 @@ class StorageClient:
         except Exception:
             logger.exception("거래 이력 조회 실패")
             return []
+    def get_recent_sell_trades(self, limit: int = 100) -> list[dict]:
+        """켈리 공식 계산용 최근 매도 거래 PnL 목록을 반환합니다.
+    
+        Returns:
+            list[dict]: 각 dict에 'pnl' 키 포함. 빈 리스트면 데이터 없음.
+        """
+        try:
+            result = (
+                self._client.table("trades")
+                .select("pnl")
+                .eq("side", "ask")
+                .not_.is_("pnl", "null")
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.exception("매도 거래 조회 실패: %s", e)
+            return []
+
 
     # ── daily_stats ──────────────────────────────────────────
 
@@ -197,6 +221,8 @@ class StorageClient:
         upbit_status: str | None = None,
         kakao_status: str | None = None,
         strategy_params: dict | None = None,
+        market_regime: str | None = None,
+        kelly_fraction: float | None = None,
     ) -> None:
         """봇 실시간 상태를 갱신합니다 (단일 행 upsert).
 
@@ -224,6 +250,10 @@ class StorageClient:
             row["kakao_status"] = kakao_status
         if strategy_params is not None:
             row["strategy_params"] = strategy_params
+        if market_regime is not None:
+            row["market_regime"] = market_regime
+        if kelly_fraction is not None:
+            row["kelly_fraction"] = round(kelly_fraction, 6)
         try:
             self._client.table("bot_state").upsert(
                 row, on_conflict="id"

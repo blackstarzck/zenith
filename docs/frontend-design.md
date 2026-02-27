@@ -17,9 +17,9 @@
 
 #### 2.1. Dashboard (오버뷰)
 
-* **상단(Summary Cards):** 총 자산, 전일 대비 변동, 현재 운용 중인 종목 수, **리스크 노출도(Risk Exposure)**, **API 쿼터(Rate Limit) 상태**.
+* **상단(Summary Cards):** 총 자산, 전일 대비 변동, 현재 운용 중인 종목 수, **리스크 노출도(Risk Exposure)**, **API 쿼터(Rate Limit) 상태**, **시장 레짐 배지(Market Regime Badge — Ranging/Trending/Volatile)**, **켈리 비중 배지(Kelly Fraction — 현재 적용 중인 투자 비중)**.
 * **중앙(Chart Section):** Recharts를 활용한 자산 성장 곡선 및 현재 자산 구성 비율(Donut Chart).
-* **하단(Quick View):** 최근 5건의 매매 이력 및 시스템 로그 요약.
+* **하단(Quick View):** 최근 5건의 매매 이력(슬리피지 컬럼 포함) 및 시스템 로그 요약.
 
 #### 2.2. Trading (모니터링 & 제어)
 
@@ -41,7 +41,7 @@
 
 
 * **Analytics Page Tabs:**
-* **Trade History:** 익절/손절로 마감된 거래 기록 상세 분석.
+* **Trade History:** 익절/손절로 마감된 거래 기록 상세 분석. 각 매수 거래에 대한 예상 슬리피지(bps) 표시.
 * **Benchmarking:** 백테스팅 예측 수익과 실제 실전 수익의 괴리율을 비교하는 대조 그래프.
 
 

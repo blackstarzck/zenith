@@ -80,6 +80,10 @@ class StrategyParams:
     adx_period: int = 14
     adx_trend_threshold: float = 25.0  # ADX > 이 값이면 강한 추세로 판단
 
+    # 시장 레짐 감지기
+    regime_adx_trending_threshold: float = 25.0  # ADX ≥ 이 값이면 추세장
+    regime_vol_overload_ratio: float = 2.0       # 변동성 비율 ≥ 이 값이면 변동성 폭발
+    regime_lookback_candles: int = 3             # 히스테리시스 룩백 (다수결 캔들 수)
     def to_dict(self) -> dict:
         """StrategyParams를 딕셔너리로 변환합니다."""
         return asdict(self)
@@ -102,6 +106,13 @@ class RiskParams:
     daily_loss_limit_ratio: float = 0.05    # 일일 최대 손실 비율 5%
     unfilled_timeout_sec: int = 30          # 미체결 주문 타임아웃 30초 (시장가 기준)
     min_order_amount_krw: int = 5000        # 업비트 최소 주문 금액
+
+    # 켈리 공식 포지션 사이징
+    kelly_multiplier: float = 0.5        # Half-Kelly (0.5배)
+    kelly_min_trades: int = 30           # 최소 샘플 수 (미달 시 고정비율 폴백)
+
+    # 슬리피지 허용 한도
+    slippage_threshold_bps: float = 50.0  # 50bps (0.5%) 초과 시 진입 거부
 
 
 @dataclass(frozen=True)

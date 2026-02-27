@@ -6,11 +6,20 @@
 - **주요 Endpoint:**
     - `GET /v1/accounts` (잔고 확인)
     - `POST /v1/orders` (주문 생성)
+### 1.1. 데이터 수집 및 분석 (Collector)
+- **주요 기능:**
+    - `get_orderbook(symbol)`: 현재 호가창 데이터를 수집.
+    - `estimate_slippage(symbol, side, amount_krw)`: 특정 금액을 시장가로 주문했을 때의 예상 슬리피지를 계산.
+- **슬리피지 계산 알고리즘 (Walk-the-book):**
+    1. 호가창의 매수/매도 잔량을 가격 순으로 정렬.
+    2. 주문 금액(`amount_krw`)이 모두 소진될 때까지 각 호가의 잔량을 차례대로 차감.
+    3. 최종적으로 체결된 평균 가격과 현재 최우선 호가(Best Bid/Ask) 간의 차이를 슬리피지로 산출.
+- **예외 처리:** API 오류 또는 데이터 수집 실패 시, 시스템 중단을 방지하기 위해 슬리피지를 0.0으로 반환(Fail-open)하고 로그를 기록.
 
 ## 2. 슈파베이스 (Supabase) DB
 - **연동 방식:** `supabase-py` 라이브러리 활용.
 - **주요 테이블 구조:**
-    - `trades`: id, symbol, side, price, volume, fee, created_at
+    - `trades`: id, symbol, side, price, volume, fee, slippage, created_at
     - `daily_stats`: date, total_balance, profit_loss
 
 ## 3. 카카오톡 알림 (KakaoTalk API)

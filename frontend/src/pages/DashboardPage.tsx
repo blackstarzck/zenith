@@ -38,6 +38,20 @@ const COLOR_RISE = '#ff4d4f';   // 상승 · 플러스 = 빨강
 const COLOR_FALL = '#1890ff';   // 하락 · 마이너스 = 파랑
 const COLOR_EVEN = '#999';      // 보합 · 중립 = 회색
 
+/* ── 시장 레짐 표시 매핑 ──────────────────────────────── */
+const REGIME_DISPLAY: Record<string, { label: string; color: string }> = {
+  ranging: { label: '횡보장', color: 'green' },
+  trending: { label: '추세장', color: 'orange' },
+  volatile: { label: '변동성 폭발', color: 'red' },
+};
+
+const formatKellyBadge = (fraction: number | null | undefined) => {
+  if (fraction == null) return null;
+  const pct = (fraction * 100).toFixed(1);
+  const color = fraction <= 0 ? 'red' : fraction < 0.1 ? 'orange' : 'blue';
+  return { text: `Kelly ${pct}%`, color };
+};
+
 /* ── 차트 기간 옵션 ────────────────────────────────────── */
 
 const CHART_RANGES = [
@@ -139,6 +153,14 @@ const tradeColumns: ColumnsType<Trade> = [
       return <Text style={{ color }}>{`${v >= 0 ? '+' : ''}${Math.round(v).toLocaleString()}`}</Text>;
     },
   },
+  {
+    title: '슬리피지',
+    dataIndex: 'slippage',
+    key: 'slippage',
+    width: 80,
+    render: (val: number | null) =>
+      val != null ? `${val.toFixed(1)}bp` : '-',
+    },
 ];
 
 /* ── 거래대금 상위 종목 테이블 컬럼 (모듈 레벨 — 안정 참조) ── */
@@ -553,7 +575,7 @@ export default function DashboardPage() {
   const [strategyEditOpen, setStrategyEditOpen] = useState(false);
   const [currentStrategyParams, setCurrentStrategyParams] = useState<StrategyParams>({
     bb_period: 20, bb_std_dev: 2.0, rsi_period: 14, rsi_oversold: 30,
-    atr_period: 14, atr_multiplier: 2.5,
+    atr_period: 14, atr_stop_multiplier: 2.5,
   });
   const [, setActivePreset] = useState<string | null>(null);
   const [messageApi, contextHolder] = message.useMessage();
@@ -671,6 +693,21 @@ export default function DashboardPage() {
           {displayPreset && (
             <Tag color="blue" style={{ margin: 0 }}>{displayPreset}</Tag>
           )}
+          {botState?.market_regime && REGIME_DISPLAY[botState.market_regime] && (
+            <Tooltip destroyOnHidden title="BTC 기준 시장 상태 (10분 간격 갱신)">
+              <Tag color={REGIME_DISPLAY[botState.market_regime].color} style={{ margin: 0 }}>
+                {REGIME_DISPLAY[botState.market_regime].label}
+              </Tag>
+            </Tooltip>
+          )}
+          {botState?.kelly_fraction != null && (() => {
+            const badge = formatKellyBadge(botState.kelly_fraction);
+            return badge ? (
+              <Tooltip title={`켈리 공식 기반 포지션 비중: ${badge.text}`}>
+                <Tag color={badge.color} style={{ margin: 0 }}>{badge.text}</Tag>
+              </Tooltip>
+            ) : null;
+          })()}
         </Flex>
         <Button
           icon={<EditOutlined />}

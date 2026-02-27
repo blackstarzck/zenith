@@ -19,6 +19,7 @@ from src.risk.manager import RiskManager
 from src.storage.client import StorageClient
 from src.notifier.kakao import KakaoNotifier
 from src.report.generator import generate_daily_report
+from src.strategy.regime import classify_regime, MarketRegime
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class Orchestrator:
         self._daily_report_sent: bool = False  # 당일 08:00 리포트 발송 여부
         self._consecutive_errors: int = 0     # 연속 에러 횟수 (지수 백오프용)
         self._max_backoff_sec: int = 300          # 최대 백오프 5분
+        self._current_regime: str = "ranging"  # 현재 시장 레짐
 
     # ── 안전한 알림 래퍼 ───────────────────────────────────
 
@@ -178,6 +180,12 @@ class Orchestrator:
                 logger.warning("감시 대상 종목 없음")
                 return
 
+        # 1.5. 시장 레짐 감지 (10분마다, 종목 목록 갱신과 동일 주기)
+        if self._loop_count % 60 == 1:
+            self._update_market_regime()
+        # 1.6. 켈리 비중 업데이트 (10분마다, 레짐과 오프셋)
+        if self._loop_count % 60 == 2:
+            self._update_kelly_fraction()
         if not hasattr(self, "_target_symbols") or not self._target_symbols:
             self._target_symbols = self._collector.get_top_volume_symbols(
                 self._config.strategy.top_volume_count
@@ -271,6 +279,15 @@ class Orchestrator:
 
     def _evaluate_entries(self) -> None:
         """미보유 종목의 진입 조건을 평가합니다."""
+        # 레짐 기반 진입 필터 (trending/volatile → 신규 진입 차단)
+        if self._current_regime in ("trending", "volatile"):
+            if self._loop_count % 60 == 1:  # 10분에 1번만 로그
+                logger.info(
+                    "[진입 차단] 시장 레짐 '%s' — 신규 진입 대기 중",
+                    self._current_regime,
+                )
+            return
+
         try:
             current_balance = self._get_total_balance_krw()
             krw = self._collector.get_krw_balance()
@@ -419,14 +436,25 @@ class Orchestrator:
 
     def _execute_buy(self, symbol: str, signal, current_balance: float) -> None:
         """매수 주문을 실행합니다."""
-        amount = self._risk.calc_position_size(current_balance)
+        # 켈리 기반 사이징
+        recent_trades = self._storage.get_recent_sell_trades(limit=100)
+        amount = self._risk.calc_position_size(current_balance, recent_trades)
         if amount <= 0:
-            logger.info("[%s] 투입 가능 금액 부족", symbol)
+            logger.info("[%s] 투입 가능 금액 부족 (Kelly 차단 또는 잔고 부족)", symbol)
+            return
+
+        # 슬리피지 체크
+        slippage_bps = self._collector.estimate_slippage(symbol, 'buy', amount)
+        if slippage_bps > self._risk._params.slippage_threshold_bps:
+            logger.info(
+                '[슬리피지 초과] %s | 예상: %.1f bps > 한도: %.1f bps, 진입 거부',
+                symbol, slippage_bps, self._risk._params.slippage_threshold_bps,
+            )
             return
 
         logger.info(
-            "[매수 진입] %s | 사유: %s | 금액: %.0f KRW",
-            symbol, signal.reason, amount,
+            "[매수 진입] %s | 사유: %s | 금액: %.0f KRW | 슬리피지: %.1f bps",
+            symbol, signal.reason, amount, slippage_bps,
         )
 
         result = self._executor.buy_market(symbol, amount)
@@ -442,7 +470,7 @@ class Orchestrator:
             amount=result.amount,
         )
 
-        # DB 기록
+        # DB 기록 (슬리피지 포함)
         self._storage.insert_trade(
             symbol=symbol,
             side="bid",
@@ -451,8 +479,8 @@ class Orchestrator:
             amount=result.amount,
             fee=result.fee,
             reason=signal.reason,
+            slippage=slippage_bps,
         )
-
     def _execute_sell_half(self, symbol: str, pos, reason: str) -> None:
         """1차 분할 익절 (50%)을 실행합니다.
 
@@ -554,6 +582,74 @@ class Orchestrator:
         if self._risk.is_daily_stopped:
             self._safe_notify("notify_daily_stop", self._risk.daily_realized_pnl)
 
+    # ── 시장 레짐 감지 ─────────────────────────────────────
+
+    def _update_market_regime(self) -> None:
+        """BTC-KRW 데이터로 시장 레짐을 판단하고 bot_state에 저장합니다."""
+        try:
+            df = self._collector.get_ohlcv(
+                "KRW-BTC",
+                interval=self._config.candle_interval,
+                count=self._config.candle_count,
+            )
+            if df.empty:
+                logger.warning("BTC-KRW OHLCV 데이터 없음 — 레짐 판단 건너뜀")
+                return
+
+            params = self._config.strategy
+            result = classify_regime(
+                df,
+                adx_trending_threshold=params.regime_adx_trending_threshold,
+                vol_overload_ratio=params.regime_vol_overload_ratio,
+                adx_period=params.adx_period,
+                vol_short_window=params.vol_short_window,
+                vol_long_window=params.vol_long_window,
+                ma_short_period=params.ma_short_period,
+                ma_long_period=params.ma_long_period,
+                lookback_candles=params.regime_lookback_candles,
+            )
+
+            new_regime = result.regime.value
+            if new_regime != self._current_regime:
+                logger.info(
+                    "[레짐 변경] %s → %s | ADX=%.1f, Vol=%.2f | 사유: %s",
+                    self._current_regime, new_regime,
+                    result.adx, result.volatility_ratio, result.reason,
+                )
+                self._current_regime = new_regime
+
+            self._storage.upsert_bot_state(market_regime=self._current_regime)
+
+        except Exception:
+            logger.warning("시장 레짐 판단 실패 — 기존 레짐 유지 (%s)", self._current_regime)
+
+    def _update_kelly_fraction(self) -> None:
+        """켈리 비중을 계산하여 bot_state에 업데이트합니다."""
+        try:
+            recent_trades = self._storage.get_recent_sell_trades(limit=100)
+            if not recent_trades or len(recent_trades) < self._risk._params.kelly_min_trades:
+                kelly_f = None  # 데이터 부족
+            else:
+                wins = [t['pnl'] for t in recent_trades if t.get('pnl', 0) > 0]
+                losses = [t['pnl'] for t in recent_trades if t.get('pnl', 0) < 0]
+                if not losses or not wins:
+                    kelly_f = None
+                else:
+                    total = len(wins) + len(losses)
+                    win_rate = len(wins) / total
+                    avg_win = sum(wins) / len(wins)
+                    avg_loss = abs(sum(losses) / len(losses))
+                    if avg_loss == 0:
+                        kelly_f = None
+                    else:
+                        raw_kelly = win_rate - ((1 - win_rate) / (avg_win / avg_loss))
+                        kelly_f = min(raw_kelly * self._risk._params.kelly_multiplier,
+                                      self._risk._params.max_position_ratio)
+                        if kelly_f <= 0:
+                            kelly_f = 0.0
+            self._storage.upsert_bot_state(kelly_fraction=kelly_f)
+        except Exception as e:
+            logger.warning('[Kelly 업데이트 실패] %s', e)
     # ── 전략 파라미터 핫리로드 ─────────────────────────────────
 
     def _reload_strategy_params(self) -> None:

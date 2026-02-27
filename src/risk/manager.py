@@ -63,18 +63,80 @@ class RiskManager:
 
         return True, "진입 가능"
 
-    def calc_position_size(self, current_balance: float) -> float:
-        """신규 진입 시 투입 금액을 계산합니다 (KRW).
+    def calc_position_size(self, current_balance: float,
+                           recent_sell_trades: list[dict] | None = None) -> float:
+        """포지션 크기(KRW)를 계산합니다.
 
-        전체 자산의 max_position_ratio(20%) 이하로 제한.
+        켈리 공식 기반 동적 사이징: 최근 매도 거래 통계로 최적 비중 산출.
+        데이터 부족(< kelly_min_trades) 시 기존 고정비율(max_position_ratio) 폴백.
+
+        Args:
+            current_balance: 현재 가용 잔고 (KRW)
+            recent_sell_trades: 최근 매도 거래 목록 (각 dict에 'pnl' 키 필수). None이면 고정비율.
+
+        Returns:
+            float: 투입 금액 (KRW). 0.0이면 진입 차단.
         """
-        max_amount = current_balance * self._params.max_position_ratio
+        fixed_size = current_balance * self._params.max_position_ratio
 
         # 최소 주문 금액 확인
-        if max_amount < self._params.min_order_amount_krw:
+        if fixed_size < self._params.min_order_amount_krw:
             return 0.0
 
-        return max_amount
+        # 폴백 조건: 데이터 없음 또는 부족
+        if not recent_sell_trades or len(recent_sell_trades) < self._params.kelly_min_trades:
+            logger.debug('[Kelly 폴백] 매도 거래 %d건 < 최소 %d건, 고정비율 %.0f%% 사용',
+                         len(recent_sell_trades) if recent_sell_trades else 0,
+                         self._params.kelly_min_trades,
+                         self._params.max_position_ratio * 100)
+            return fixed_size
+
+        # 승률/손익비 계산
+        wins = [t['pnl'] for t in recent_sell_trades if t.get('pnl', 0) > 0]
+        losses = [t['pnl'] for t in recent_sell_trades if t.get('pnl', 0) < 0]
+
+        # 엣지 케이스: 손실 없음 (전승) → 고정비율 사용 (과신 방지)
+        if not losses:
+            logger.info('[Kelly 폴백] 손실 거래 0건 (전승), 고정비율 사용')
+            return fixed_size
+
+        # 엣지 케이스: 승리 없음 (전패) → 진입 차단
+        if not wins:
+            logger.warning('[Kelly 차단] 승리 거래 0건 (전패), 진입 차단')
+            return 0.0
+
+        total = len(wins) + len(losses)
+        win_rate = len(wins) / total
+        avg_win = sum(wins) / len(wins)
+        avg_loss = abs(sum(losses) / len(losses))
+
+        if avg_loss == 0:
+            return fixed_size  # 0으로 나누기 방지
+        win_loss_ratio = avg_win / avg_loss
+
+        # 켈리 공식: f* = p - (1-p)/b
+        kelly_f = win_rate - ((1 - win_rate) / win_loss_ratio)
+
+        # Half-Kelly 적용
+        optimal_f = kelly_f * self._params.kelly_multiplier
+
+        # 켈리 ≤ 0 → 기대값 음수, 진입 차단
+        if optimal_f <= 0:
+            logger.warning('[Kelly 차단] 기대값 음수 (Kelly=%.4f), 진입 차단', kelly_f)
+            return 0.0
+
+        # max_position_ratio로 캡핑
+        capped_f = min(optimal_f, self._params.max_position_ratio)
+        kelly_size = current_balance * capped_f
+
+        # 최소 주문 금액 확인
+        if kelly_size < self._params.min_order_amount_krw:
+            return 0.0
+
+        logger.info('[Kelly 사이징] 승률: %.1f%%, 손익비: %.2f, Kelly: %.1f%% → %.0f KRW',
+                    win_rate * 100, win_loss_ratio, capped_f * 100, kelly_size)
+
+        return kelly_size
 
     # ── 포지션 관리 ──────────────────────────────────────────
 

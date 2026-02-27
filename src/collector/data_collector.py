@@ -77,6 +77,86 @@ class UpbitCollector:
         if isinstance(orderbook, list):
             return orderbook[0] if orderbook else {}
         return orderbook
+    def estimate_slippage(self, symbol: str, side: str, amount_krw: float) -> float:
+        """호가창을 시뮬레이션하여 예상 슬리피지를 bps 단위로 반환합니다.
+
+        Args:
+            symbol: 종목 코드 (예: 'KRW-BTC')
+            side: 'buy' 또는 'sell'
+            amount_krw: 매수 시 투입 금액 (KRW)
+
+        Returns:
+            float: 예상 슬리피지 (bps). 오류 시 0.0 (fail-open).
+        """
+        try:
+            orderbook = self.get_orderbook(symbol)
+            if not orderbook or 'orderbook_units' not in orderbook:
+                logger.warning('[슬리피지] %s 호가 데이터 없음, 0.0 반환', symbol)
+                return 0.0
+
+            units = orderbook['orderbook_units']
+            if not units:
+                return 0.0
+
+            if side == 'buy':
+                # 매수: ask(매도 호가) 아래서부터 위로 소진
+                best_price = units[0]['ask_price']
+                remaining = amount_krw
+                total_volume = 0.0
+                total_cost = 0.0
+
+                for unit in units:
+                    price = unit['ask_price']
+                    size = unit['ask_size']
+                    level_cost = price * size
+
+                    if remaining >= level_cost:
+                        total_cost += level_cost
+                        total_volume += size
+                        remaining -= level_cost
+                    else:
+                        volume_at_level = remaining / price
+                        total_cost += remaining
+                        total_volume += volume_at_level
+                        remaining = 0.0
+                        break
+            else:
+                # 매도: bid(매수 호가) 위에서부터 아래로 소진
+                best_price = units[0]['bid_price']
+                remaining_volume = amount_krw / best_price if best_price > 0 else 0
+                total_volume = 0.0
+                total_cost = 0.0
+
+                for unit in units:
+                    price = unit['bid_price']
+                    size = unit['bid_size']
+                    if remaining_volume >= size:
+                        total_cost += price * size
+                        total_volume += size
+                        remaining_volume -= size
+                    else:
+                        total_cost += price * remaining_volume
+                        total_volume += remaining_volume
+                        remaining_volume = 0.0
+                        break
+                remaining = remaining_volume  # 남은 수량
+
+            # 호가창 깊이 부족
+            if remaining > 0 or total_volume == 0:
+                logger.warning('[슬리피지] %s 호가 깊이 부족, 전량 소진 불가', symbol)
+                return 9999.0  # 극단적 슬리피지 → 진입 거부 유도
+
+            avg_price = total_cost / total_volume
+            slippage_bps = abs((avg_price - best_price) / best_price) * 10000
+
+            logger.debug('[슬리피지] %s | 최우선가: %.0f, 예상평균가: %.0f, 슬리피지: %.1f bps',
+                         symbol, best_price, avg_price, slippage_bps)
+
+            return round(slippage_bps, 2)
+
+        except Exception as e:
+            logger.warning('[슬리피지] %s 추정 실패: %s — 0.0 반환 (fail-open)', symbol, e)
+            return 0.0  # fail-open: API 오류가 거래를 차단하면 안 됨
 
     # ── 거래 대금 기준 종목 추출 ─────────────────────────────
 
