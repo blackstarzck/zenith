@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Trade, DailyStat, SystemLog, BotState, PriceSnapshot, BalanceSnapshot, HeldPosition, DailyReport } from '../types/database';
 import dayjs from 'dayjs';
+import { useRecoveryTick } from './useRecoverySignal';
 
 /* ── Trades ─────────────────────────────────────────────── */
 
 export function useTrades(limit = 50) {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
 
   const fetch = useCallback(async () => {
     setLoading(true);
@@ -37,7 +39,7 @@ export function useTrades(limit = 50) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetch, limit]);
+  }, [fetch, limit, recoveryTick]);
 
   return { trades, loading, refetch: fetch };
 }
@@ -47,6 +49,7 @@ export function useTrades(limit = 50) {
 export function useDailyStats(days = 30) {
   const [stats, setStats] = useState<DailyStat[]>([]);
   const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
 
   useEffect(() => {
     (async () => {
@@ -63,7 +66,7 @@ export function useDailyStats(days = 30) {
       setStats((data as DailyStat[]) ?? []);
       setLoading(false);
     })();
-  }, [days]);
+  }, [days, recoveryTick]);
 
   return { stats, loading };
 }
@@ -78,6 +81,7 @@ export function useDailyStats(days = 30) {
 export function useSystemLogs(date: string | null = null, limit = 500, enabled = true) {
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
 
   const targetDate = date ?? dayjs().format('YYYY-MM-DD');
   const startOfDay = `${targetDate}T00:00:00.000Z`;
@@ -117,7 +121,7 @@ export function useSystemLogs(date: string | null = null, limit = 500, enabled =
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [targetDate, startOfDay, endOfDay, isToday, limit, enabled]);
+  }, [targetDate, startOfDay, endOfDay, isToday, limit, enabled, recoveryTick]);
 
   return { logs, loading };
 }
@@ -127,6 +131,7 @@ export function useSystemLogs(date: string | null = null, limit = 500, enabled =
 export function useBotState() {
   const [botState, setBotState] = useState<BotState | null>(null);
   const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
 
   useEffect(() => {
     (async () => {
@@ -158,7 +163,7 @@ export function useBotState() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [recoveryTick]);
 
   return { botState, loading };
 }
@@ -168,6 +173,7 @@ export function useBotState() {
 export function usePriceSnapshots(symbol: string | null, limit = 120) {
   const [snapshots, setSnapshots] = useState<PriceSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
 
   const fetch = useCallback(async () => {
     if (!symbol) {
@@ -210,7 +216,7 @@ export function usePriceSnapshots(symbol: string | null, limit = 120) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetch, symbol, limit]);
+  }, [fetch, symbol, limit, recoveryTick]);
 
   return { snapshots, loading, refetch: fetch };
 }
@@ -227,6 +233,7 @@ export function usePriceSnapshots(symbol: string | null, limit = 120) {
 export function useHeldSymbols() {
   const [symbols, setSymbols] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
 
   useEffect(() => {
     (async () => {
@@ -306,7 +313,7 @@ export function useHeldSymbols() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [recoveryTick]);
 
   return { symbols, loading };
 }
@@ -316,6 +323,7 @@ export function useHeldSymbols() {
 export function useBalanceSnapshots(hours = 24) {
   const [snapshots, setSnapshots] = useState<BalanceSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
 
   useEffect(() => {
     (async () => {
@@ -329,7 +337,7 @@ export function useBalanceSnapshots(hours = 24) {
       setSnapshots((data as BalanceSnapshot[]) ?? []);
       setLoading(false);
     })();
-  }, [hours]);
+  }, [hours, recoveryTick]);
 
   return { snapshots, loading };
 }
@@ -343,52 +351,75 @@ export function useBalanceSnapshots(hours = 24) {
 export function useHeldPositions(heldSymbols: string[]) {
   const [positions, setPositions] = useState<Map<string, HeldPosition>>(new Map());
   const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
   const symbolsKey = heldSymbols.join(',');
 
-  useEffect(() => {
+  const fetch = useCallback(async () => {
     if (heldSymbols.length === 0) {
       setPositions(new Map());
       setLoading(false);
       return;
     }
+    setLoading(true);
+    const { data } = await supabase
+      .from('trades')
+      .select('*')
+      .in('symbol', heldSymbols)
+      .order('created_at', { ascending: false });
 
-    (async () => {
-      setLoading(true);
-      const { data } = await supabase
-        .from('trades')
-        .select('*')
-        .in('symbol', heldSymbols)
-        .order('created_at', { ascending: false });
+    const posMap = new Map<string, HeldPosition>();
+    const fullyLiquidated = new Set<string>();
 
-      const posMap = new Map<string, HeldPosition>();
-      const fullyLiquidated = new Set<string>();
+    for (const trade of (data as Trade[]) ?? []) {
+      // 이미 처리된 종목은 스킵
+      if (posMap.has(trade.symbol) || fullyLiquidated.has(trade.symbol)) continue;
 
-      for (const trade of (data as Trade[]) ?? []) {
-        // 이미 처리된 종목은 스킵
-        if (posMap.has(trade.symbol) || fullyLiquidated.has(trade.symbol)) continue;
-
-        if (trade.side === 'ask') {
-          if (trade.remaining_volume != null && trade.remaining_volume <= 0) {
-            // 전량 매도 완료 → 보유 아님
-            fullyLiquidated.add(trade.symbol);
-          }
-          // 부분 매도(remaining > 0)는 스킵하고 아래의 bid를 탐색
-          continue;
+      if (trade.side === 'ask') {
+        if (trade.remaining_volume != null && trade.remaining_volume <= 0) {
+          // 전량 매도 완료 → 보유 아님
+          fullyLiquidated.add(trade.symbol);
         }
-
-        // bid → 매수 포지션 등록
-        posMap.set(trade.symbol, {
-          symbol: trade.symbol,
-          entry_price: trade.price,
-          volume: trade.volume,
-          amount: trade.amount,
-          created_at: trade.created_at,
-        });
+        // 부분 매도(remaining > 0)는 스킵하고 아래의 bid를 탐색
+        continue;
       }
-      setPositions(posMap);
-      setLoading(false);
-    })();
+
+      // bid → 매수 포지션 등록
+      posMap.set(trade.symbol, {
+        symbol: trade.symbol,
+        entry_price: trade.price,
+        volume: trade.volume,
+        amount: trade.amount,
+        created_at: trade.created_at,
+      });
+    }
+    setPositions(posMap);
+    setLoading(false);
   }, [symbolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetch();
+
+    if (heldSymbols.length === 0) return;
+
+    // 실시간: trades INSERT 구독으로 포지션 변경 즉시 반영
+    const channel = supabase
+      .channel('held-positions-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'trades' },
+        (payload) => {
+          const trade = payload.new as Trade;
+          if (heldSymbols.includes(trade.symbol)) {
+            fetch();
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetch, recoveryTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { positions, loading };
 }
@@ -399,6 +430,7 @@ export function useHeldPositions(heldSymbols: string[]) {
 export function useLatestSnapshots(heldSymbols: string[]) {
   const [snapshots, setSnapshots] = useState<Map<string, PriceSnapshot>>(new Map());
   const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
   const symbolsKey = heldSymbols.join(',');
 
   const fetch = useCallback(async () => {
@@ -452,7 +484,7 @@ export function useLatestSnapshots(heldSymbols: string[]) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetch, recoveryTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { snapshots, loading };
 }
@@ -463,6 +495,7 @@ export function useLatestSnapshots(heldSymbols: string[]) {
 export function useDailyReports(limit = 30) {
   const [reports, setReports] = useState<DailyReport[]>([]);
   const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
 
   const fetch = useCallback(async () => {
     setLoading(true);
@@ -490,7 +523,7 @@ export function useDailyReports(limit = 30) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetch]);
+  }, [fetch, recoveryTick]);
 
   return { reports, loading, refetch: fetch };
 }
@@ -498,6 +531,7 @@ export function useDailyReports(limit = 30) {
 export function useDailyReport(reportDate: string | null) {
   const [report, setReport] = useState<DailyReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const recoveryTick = useRecoveryTick();
 
   useEffect(() => {
     if (!reportDate) {
@@ -514,7 +548,7 @@ export function useDailyReport(reportDate: string | null) {
       setReport((data as DailyReport) ?? null);
       setLoading(false);
     })();
-  }, [reportDate]);
+  }, [reportDate, recoveryTick]);
 
   return { report, loading };
 }

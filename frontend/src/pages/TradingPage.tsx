@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Row,
   Col,
@@ -116,11 +116,27 @@ export default function TradingPage() {
   const [selectedPosition, setSelectedPosition] = useState<EmergencyPosition | null>(null);
   const [botStatus, setBotStatus] = useState<BotStatus>('active');
 
-  // 간이 포지션 추출: 매수 기록 중 아직 매도되지 않은 종목
-  const buyTrades = trades.filter((t) => t.side === 'bid');
-  const sellSymbols = new Set(trades.filter((t) => t.side === 'ask').map((t) => t.symbol));
-  const activePositions = buyTrades.filter((t) => !sellSymbols.has(t.symbol));
-  void buyTrades.filter((t) => sellSymbols.has(t.symbol));
+  // 종목별 최신 거래를 확인하여 활성 포지션 추출 (remaining_volume 기반)
+  const activePositions = useMemo(() => {
+    const fullyLiquidated = new Set<string>();
+    const positionBySymbol = new Map<string, Trade>();
+
+    for (const trade of trades) {
+      if (positionBySymbol.has(trade.symbol) || fullyLiquidated.has(trade.symbol)) continue;
+
+      if (trade.side === 'ask') {
+        if (trade.remaining_volume != null && trade.remaining_volume <= 0) {
+          fullyLiquidated.add(trade.symbol);
+        }
+        continue;
+      }
+
+      // bid → 활성 포지션
+      positionBySymbol.set(trade.symbol, trade);
+    }
+
+    return [...positionBySymbol.values()];
+  }, [trades]);
 
   const handleEmergencySell = (trade: Trade) => {
     setSelectedPosition({
