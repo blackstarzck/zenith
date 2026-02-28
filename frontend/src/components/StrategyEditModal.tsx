@@ -11,6 +11,7 @@ import {
   Row,
   Col,
   message,
+  Slider,
 } from 'antd';
 import { EditOutlined, UndoOutlined, CheckOutlined } from '@ant-design/icons';
 import { DEFAULT_STRATEGY as SHARED_DEFAULT, PRESETS, getActivePresetName } from '../lib/strategyParams';
@@ -25,6 +26,13 @@ export interface StrategyParams {
   atr_period: number;
   atr_stop_multiplier: number;
   top_volume_count?: number;
+  w_volatility?: number;
+  w_ma_trend?: number;
+  w_adx?: number;
+  w_bb_recovery?: number;
+  w_rsi_slope?: number;
+  w_rsi_level?: number;
+  entry_score_threshold?: number;
 }
 
 
@@ -139,6 +147,59 @@ export default function StrategyEditModal({
           <Col span={12}>
             <Form.Item label="손절 계수" name="atr_stop_multiplier">
               <InputNumber min={1} max={5} step={0.1} style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Divider titlePlacement="left" plain>
+          스코어링 가중치
+        </Divider>
+        <Alert
+          description="각 지표의 중요도를 0.0 ~ 10.0 사이로 설정합니다. 총합이 진입 임계값을 넘으면 매수합니다."
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item label="변동성 (Volatility)" name="w_volatility">
+              <Slider min={0} max={10} step={0.1} />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="이평선 추세 (MA Trend)" name="w_ma_trend">
+              <Slider min={0} max={10} step={0.1} />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item label="ADX 추세 강도" name="w_adx">
+              <Slider min={0} max={10} step={0.1} />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="볼린저 밴드 회복" name="w_bb_recovery">
+              <Slider min={0} max={10} step={0.1} />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item label="RSI 기울기" name="w_rsi_slope">
+              <Slider min={0} max={10} step={0.1} />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="RSI 레벨" name="w_rsi_level">
+              <Slider min={0} max={10} step={0.1} />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={24}>
+            <Form.Item label="진입 스코어 임계값" name="entry_score_threshold">
+              <InputNumber min={0} max={100} step={1} style={{ width: '100%' }} />
             </Form.Item>
           </Col>
         </Row>

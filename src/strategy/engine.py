@@ -12,6 +12,7 @@ from enum import Enum, auto
 from src.strategy.indicators import (
     IndicatorSnapshot,
     calc_bollinger_bands,
+    calc_bb_status,
     calc_ma_trend,
     calc_rsi_slope,
 )
@@ -40,6 +41,7 @@ class TradeSignal:
     stop_loss_price: float | None = None
     target_price_1: float | None = None  # 1차 목표가 (BB 중앙선)
     target_price_2: float | None = None  # 2차 목표가 (BB 상단선)
+    score: float | None = None           # 스코어링 합산 점수 (0~100)
 
 
 class MeanReversionEngine:
@@ -47,11 +49,9 @@ class MeanReversionEngine:
 
     def __init__(self, params: StrategyParams) -> None:
         self._params = params
-        # 종목별 이전 캔들의 BB 하단 이탈 여부 추적
-        self._was_below_lower: dict[str, bool] = {}
 
     def update_params(self, params: StrategyParams) -> None:
-        """전략 파라미터를 핫리로드합니다 (BB 추적 상태는 보존)."""
+        """전략 파라미터를 핫리로드합니다."""
         self._params = params
 
     def evaluate_entry(
@@ -60,117 +60,117 @@ class MeanReversionEngine:
         snapshot: IndicatorSnapshot,
         closes_series: "pd.Series | None" = None,
     ) -> TradeSignal:
-        """매수 진입 조건을 평가합니다.
+        """매수 진입 조건을 스코어링 방식으로 평가합니다.
 
-        진입 조건 (모두 충족 시):
-        1. 변동성 과부하가 아닐 것 (volatility_ratio < 2.0)
-        2. 추세 필터: MA20 > MA50 (상승 추세)
-        3. 가격이 BB 하단을 뚫고 내려갔다가 다시 밴드 안으로 복귀
-        4. RSI가 35 이하에서 상승 전환 중
+        각 필터가 0~100 점수를 반환하고, 가중합산 점수가
+        entry_score_threshold 이상이면 BUY 신호를 생성합니다.
 
         Args:
             symbol: 마켓 코드
             snapshot: 현재 지표 스냅샷
-            closes_series: RSI 기울기 계산용 종가 시리즈 (선택)
+            closes_series: RSI 기울기/BB 상태 계산용 종가 시리즈 (선택)
 
         Returns:
-            TradeSignal
+            TradeSignal (score 필드 포함)
         """
         price = snapshot.current_price
         bb = snapshot.bb
-        rsi = snapshot.rsi
         params = self._params
 
-        # ── 1단계: 변동성 과부하 필터 ──
-        if snapshot.volatility_ratio >= params.volatility_overload_ratio:
-            return TradeSignal(
-                signal=Signal.MARKET_PAUSE,
-                symbol=symbol,
-                reason=f"변동성 과부하 ({snapshot.volatility_ratio:.2f}x ≥ {params.volatility_overload_ratio}x)",
-                price=price,
-            )
+        # ── 개별 필터 스코어 계산 ──
+        scores = {
+            "Vol": (params.w_volatility, self._score_volatility(snapshot.volatility_ratio)),
+            "MA": (params.w_ma_trend, self._score_ma_trend(closes_series, params)),
+            "ADX": (params.w_adx, self._score_adx(snapshot.adx)),
+            "BB": (params.w_bb_recovery, self._score_bb_recovery(closes_series, params)),
+            "RSI↗": (params.w_rsi_slope, self._score_rsi_slope(closes_series, params)),
+            "RSI": (params.w_rsi_level, self._score_rsi_level(snapshot.rsi)),
+        }
 
-        # ── 1.5단계: 추세 필터 (MA 단기 > MA 장기) ──
-        if closes_series is not None and len(closes_series) >= params.ma_long_period:
-            is_uptrend = calc_ma_trend(closes_series, short_period=params.ma_short_period, long_period=params.ma_long_period)
-            if is_uptrend is False:
-                return TradeSignal(
-                    signal=Signal.HOLD,
-                    symbol=symbol,
-                    reason=f"하락 추세 (MA{params.ma_short_period} < MA{params.ma_long_period}) — 진입 보류",
-                    price=price,
-                )
-
-        # ── 1.75단계: ADX 추세 강도 필터 ──
-        if snapshot.adx > params.adx_trend_threshold:
+        # ── 정규화 가중합산 ──
+        total_weight = sum(w for w, _ in scores.values())
+        if total_weight == 0:
             return TradeSignal(
                 signal=Signal.HOLD,
                 symbol=symbol,
-                reason=f"강한 추세 감지 (ADX={snapshot.adx:.1f} > {params.adx_trend_threshold}) — 평균 회귀 부적합",
+                reason="모든 스코어링 가중치가 0 — 진입 불가",
                 price=price,
+                score=0.0,
             )
 
-        # ── 2단계: BB 하단 이탈 후 복귀 확인 ──
-        was_below = self._was_below_lower.get(symbol, False)
-        currently_below = price < bb.lower
+        total_score = sum(w * s for w, s in scores.values()) / total_weight
 
-        if currently_below:
-            # 현재 하단 이탈 중 → 다음 캔들에서 복귀 확인
-            self._was_below_lower[symbol] = True
+        # ── 스코어 breakdown 문자열 ──
+        breakdown = " ".join(f"{name}:{s:.0f}" for name, (_, s) in scores.items())
+        reason_str = f"스코어 {total_score:.1f} ({breakdown})"
+
+        # ── 임계치 비교 ──
+        if total_score >= params.entry_score_threshold:
+            stop_loss = price - (snapshot.atr * params.atr_stop_multiplier)
             return TradeSignal(
-                signal=Signal.HOLD,
+                signal=Signal.BUY,
                 symbol=symbol,
-                reason=f"BB 하단 이탈 중 (가격 {price:,.2f} < 하단 {bb.lower:,.2f}), 복귀 대기",
+                reason=f"{reason_str} ≥ {params.entry_score_threshold:.1f}",
                 price=price,
+                stop_loss_price=stop_loss,
+                target_price_1=bb.middle,
+                target_price_2=bb.upper,
+                score=total_score,
             )
-
-        if not was_below:
-            # 이전에 하단을 이탈한 적 없음 → 진입 조건 미충족
-            return TradeSignal(
-                signal=Signal.HOLD,
-                symbol=symbol,
-                reason="BB 하단 이탈 이력 없음",
-                price=price,
-            )
-
-        # BB 하단 이탈 후 복귀 완료! → 이력 초기화
-        self._was_below_lower[symbol] = False
-
-        # ── 3단계: RSI 확증 ──
-        rsi_rising = True  # 기본값
-        if closes_series is not None and len(closes_series) > 20:
-            rsi_slope = calc_rsi_slope(closes_series, params.rsi_period, lookback=params.rsi_slope_lookback)
-            rsi_rising = rsi_slope > 0
-
-        if not rsi_rising:
-            return TradeSignal(
-                signal=Signal.HOLD,
-                symbol=symbol,
-                reason=f"RSI 상승 전환 미확인 (RSI={rsi:.1f})",
-                price=price,
-            )
-
-        if rsi > params.rsi_oversold + params.rsi_entry_ceiling_offset:
-            # RSI가 상한을 초과하면 과매도 구간이 아님
-            return TradeSignal(
-                signal=Signal.HOLD,
-                symbol=symbol,
-                reason=f"RSI 과매도 구간 아님 (RSI={rsi:.1f})",
-                price=price,
-            )
-
-        # ── 모든 조건 충족: 매수 신호 ──
-        stop_loss = price - (snapshot.atr * params.atr_stop_multiplier)
 
         return TradeSignal(
-            signal=Signal.BUY,
+            signal=Signal.HOLD,
             symbol=symbol,
-            reason=f"BB 복귀 + RSI 과매도 상승전환 (RSI={rsi:.1f})",
+            reason=f"{reason_str} < {params.entry_score_threshold:.1f}",
             price=price,
-            stop_loss_price=stop_loss,
-            target_price_1=bb.middle,
-            target_price_2=bb.upper,
+            score=total_score,
         )
+
+    # ── 스코어링 헬퍼 메서드 ──────────────────────────────────
+
+    def _score_volatility(self, vol_ratio: float) -> float:
+        """변동성 스코어. 낮은 변동성 = 높은 점수."""
+        # vol_ratio ≤ 1.0 → 100, vol_ratio ≥ 3.0 → 0, 선형 보간
+        return max(0.0, min(100.0, (3.0 - vol_ratio) / 2.0 * 100.0))
+
+    def _score_ma_trend(self, closes_series, params: StrategyParams) -> float:
+        """MA 추세 스코어. 상승추세 = 100, 하락추세 = 0."""
+        if closes_series is None or len(closes_series) < params.ma_long_period:
+            return 50.0  # 데이터 부족 시 중립
+        is_uptrend = calc_ma_trend(closes_series, params.ma_short_period, params.ma_long_period)
+        if is_uptrend is None:
+            return 50.0
+        return 100.0 if is_uptrend else 0.0
+
+    def _score_adx(self, adx: float) -> float:
+        """ADX 스코어. 낮은 ADX(횡보) = 높은 점수 (평균회귀에 유리)."""
+        # adx ≤ 15 → 100, adx ≥ 40 → 0, 선형 보간
+        return max(0.0, min(100.0, (40.0 - adx) / 25.0 * 100.0))
+
+    def _score_bb_recovery(self, closes_series, params: StrategyParams) -> float:
+        """BB 복귀 스코어. 무상태, calc_bb_status() 사용."""
+        if closes_series is None or len(closes_series) < params.bb_period + 20:
+            return 0.0  # 데이터 부족 시 불리
+        status = calc_bb_status(closes_series, params.bb_period, params.bb_std_dev)
+        if status == "recovered":
+            return 100.0
+        elif status == "below":
+            return 30.0  # 이탈 중 — 부분 점수 (반등 가능성)
+        else:  # "none"
+            return 0.0
+
+    def _score_rsi_slope(self, closes_series, params: StrategyParams) -> float:
+        """RSI 기울기 스코어. 양의 기울기(상승전환) = 높은 점수."""
+        if closes_series is None or len(closes_series) <= 20:
+            return 50.0  # 데이터 부족 시 중립
+        slope = calc_rsi_slope(closes_series, params.rsi_period, lookback=params.rsi_slope_lookback)
+        # slope ≤ 0 → 0, slope ≥ 3.0 → 100, 선형 보간
+        return max(0.0, min(100.0, slope / 3.0 * 100.0))
+
+    def _score_rsi_level(self, rsi: float) -> float:
+        """RSI 수준 스코어. 낮은 RSI(과매도) = 높은 점수."""
+        # rsi ≤ 20 → 100, rsi ≥ 45 → 0, 선형 보간
+        return max(0.0, min(100.0, (45.0 - rsi) / 25.0 * 100.0))
 
     def evaluate_exit(
         self,
@@ -253,44 +253,3 @@ class MeanReversionEngine:
             stop_loss_price=stop_loss_price,
         )
 
-    def recover_bb_state(
-        self,
-        symbol: str,
-        closes: "pd.Series",
-        bb_period: int = 20,
-        bb_std_dev: float = 2.0,
-    ) -> None:
-        """봇 재시작 시 캔들 데이터로 BB 이탈 상태를 복구합니다.
-
-        직전 캔들이 BB 하단 아래였으면 _was_below_lower를 True로 설정합니다.
-
-        Args:
-            symbol: 마켓 코드
-            closes: 종가 시리즈
-            bb_period: 볼린저 밴드 기간
-            bb_std_dev: 볼린저 밴드 표준편차 배수
-        """
-        if len(closes) < bb_period + 1:
-            return
-
-        # 직전 캔들까지의 데이터로 BB를 계산하여 그 시점의 상태를 복원
-        prev_closes = closes.iloc[:-1]
-        try:
-            bb = calc_bollinger_bands(prev_closes, bb_period, bb_std_dev)
-            prev_close = float(prev_closes.iloc[-1])
-
-            if prev_close < bb.lower:
-                self._was_below_lower[symbol] = True
-                logger.info(
-                    "[BB 상태 복구] %s: 이전 캔들 BB 하단 이탈 확인 (%.2f < %.2f)",
-                    symbol, prev_close, bb.lower,
-                )
-            else:
-                self._was_below_lower[symbol] = False
-        except ValueError:
-            # 데이터 부족 등
-            pass
-
-    def reset_tracking(self, symbol: str) -> None:
-        """종목의 BB 이탈 추적 상태를 초기화합니다."""
-        self._was_below_lower.pop(symbol, None)

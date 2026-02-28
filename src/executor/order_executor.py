@@ -256,9 +256,11 @@ class OrderExecutor:
         try:
             order = self._upbit.get_order(order_id)
             if not order:
+                logger.error("체결 결과 조회 실패 (응답 없음): %s", order_id)
                 return OrderResult(
-                    success=True, order_id=order_id,
+                    success=False, order_id=order_id,
                     symbol=symbol, side=side,
+                    error="체결 상세 조회 실패 (응답 없음)",
                 )
 
             # 체결 정보 집계
@@ -281,6 +283,7 @@ class OrderExecutor:
         except Exception:
             logger.exception("체결 결과 조회 실패: %s", order_id)
             return OrderResult(
-                success=True, order_id=order_id,
+                success=False, order_id=order_id,
                 symbol=symbol, side=side,
+                error="체결 상세 조회 중 예외 발생",
             )

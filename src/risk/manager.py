@@ -22,6 +22,7 @@ class Position:
     volume: float
     amount: float         # 진입 총액 (KRW)
     has_sold_half: bool = False  # 1차 분할 익절 완료 여부
+    entry_fee: float = 0.0       # 매수 시 지불한 수수료 (KRW)
 
 
 class RiskManager:
@@ -146,6 +147,7 @@ class RiskManager:
         entry_price: float,
         volume: float,
         amount: float,
+        entry_fee: float = 0.0,
     ) -> None:
         """포지션을 등록합니다."""
         self._positions[symbol] = Position(
@@ -153,10 +155,11 @@ class RiskManager:
             entry_price=entry_price,
             volume=volume,
             amount=amount,
+            entry_fee=entry_fee,
         )
         logger.info(
-            "포지션 추가: %s @ %.2f KRW (수량: %f)",
-            symbol, entry_price, volume,
+            "포지션 추가: %s @ %.2f KRW (수량: %f, 수수료: %.0f)",
+            symbol, entry_price, volume, entry_fee,
         )
 
     def remove_position(self, symbol: str) -> Position | None:

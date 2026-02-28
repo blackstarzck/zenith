@@ -98,8 +98,6 @@ class Orchestrator:
             )
             # 업비트 실제 보유 종목을 RiskManager에 동기화
             self._sync_existing_positions()
-            # 봇 재시작 시 BB 이탈 상태 복구 (캔들 역산)
-            self._recover_bb_states()
             # 시작 즉시 오늘의 일일 통계 기록 (대시보드 자산 성장 곡선용)
             self._storage.upsert_daily_stats(
                 stats_date=self._today,
@@ -462,12 +460,26 @@ class Orchestrator:
             logger.error("[매수 실패] %s: %s", symbol, result.error)
             return
 
+        # 체결 결과 검증 (팬텀 포지션 방지)
+        if result.price <= 0 or result.volume <= 0:
+            logger.critical(
+                "[매수 체결 결과 이상] %s | price=%.2f, volume=%f — 포지션 등록 차단. "
+                "업비트 잔고를 수동 확인하세요.",
+                symbol, result.price, result.volume,
+            )
+            self._safe_notify(
+                "notify_error",
+                f"[긴급] {symbol} 매수 체결되었으나 결과 조회 실패. 업비트 잔고를 확인하세요.",
+            )
+            return
+
         # 포지션 등록
         self._risk.add_position(
             symbol=symbol,
             entry_price=result.price,
             volume=result.volume,
             amount=result.amount,
+            entry_fee=result.fee,
         )
 
         # DB 기록 (슬리피지 포함)
@@ -514,7 +526,6 @@ class Orchestrator:
                     symbol, full_amount, min_order,
                 )
                 self._risk.remove_position(symbol)
-                self._strategy.reset_tracking(symbol)
             return
 
         logger.info("[1차 익절] %s | 사유: %s", symbol, reason)
@@ -526,8 +537,9 @@ class Orchestrator:
 
         self._risk.mark_half_sold(symbol)
 
-        # 실현 손익 계산
-        pnl = result.amount - (pos.entry_price * result.volume) - result.fee
+        # 실현 손익 계산 (매수 수수료 비례 배분 포함)
+        buy_fee_share = pos.entry_fee * (result.volume / pos.volume) if pos.volume > 0 else 0.0
+        pnl = result.amount - (pos.entry_price * result.volume) - result.fee - buy_fee_share
         pnl_pct = ((result.price / pos.entry_price) - 1) * 100 if pos.entry_price > 0 else 0
         self._risk.record_realized_pnl(pnl)
 
@@ -549,7 +561,6 @@ class Orchestrator:
         actual_volume = self._collector.get_balance(symbol)
         if actual_volume <= 0:
             self._risk.remove_position(symbol)
-            self._strategy.reset_tracking(symbol)
             return
 
         logger.info("[%s] %s | 사유: %s", label, symbol, reason)
@@ -559,13 +570,13 @@ class Orchestrator:
             logger.error("[%s 실패] %s: %s", label, symbol, result.error)
             return
 
-        # 실현 손익 계산
-        pnl = result.amount - (pos.entry_price * result.volume) - result.fee
+        # 실현 손익 계산 (매수 수수료 비례 배분 포함)
+        buy_fee_share = pos.entry_fee * (result.volume / pos.volume) if pos.volume > 0 else 0.0
+        pnl = result.amount - (pos.entry_price * result.volume) - result.fee - buy_fee_share
         pnl_pct = ((result.price / pos.entry_price) - 1) * 100 if pos.entry_price > 0 else 0
         self._risk.record_realized_pnl(pnl)
 
         self._risk.remove_position(symbol)
-        self._strategy.reset_tracking(symbol)
 
         self._storage.insert_trade(
             symbol=symbol, side="ask",
@@ -727,32 +738,6 @@ class Orchestrator:
             )
         if synced:
             logger.info("기존 보유 종목 %d개 동기화 완료", synced)
-
-    def _recover_bb_states(self) -> None:
-        """봇 재시작 시 감시 종목의 BB 이탈 상태를 캔들 데이터로 복구합니다."""
-        tickers = self._collector.get_top_volume_symbols(
-            self._config.strategy.top_volume_count
-        )
-        params = self._config.strategy
-        recovered = 0
-        for symbol in tickers:
-            try:
-                df = self._collector.get_ohlcv(
-                    symbol,
-                    interval=self._config.candle_interval,
-                    count=self._config.candle_count,
-                )
-                if df.empty:
-                    continue
-                self._strategy.recover_bb_state(
-                    symbol, df["close"], params.bb_period, params.bb_std_dev,
-                )
-                recovered += 1
-                time.sleep(0.1)
-            except Exception as e:
-                logger.error("BB 상태 복구 오류 [%s]: %s", symbol, e)
-        if recovered:
-            logger.info("BB 이탈 상태 복구 완료: %d개 종목", recovered)
 
     def _get_total_balance_krw(self) -> float:
         """전체 자산을 KRW 기준으로 환산합니다.

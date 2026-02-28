@@ -497,7 +497,6 @@ class PaperTradingBot:
 
         self._risk.record_realized_pnl(pnl)
         self._risk.remove_position(symbol)
-        self._strategy.reset_tracking(symbol)
         del self._positions[symbol]
 
         slippage = result.price * PAPER_SLIPPAGE_RATE * result.volume

@@ -3,6 +3,7 @@
 """
 
 import pytest
+import pandas as pd
 
 from src.config import StrategyParams
 from src.strategy.engine import MeanReversionEngine, Signal, TradeSignal
@@ -43,121 +44,119 @@ def make_engine(params: StrategyParams | None = None) -> MeanReversionEngine:
 # ── 진입 조건 테스트 ─────────────────────────────────────────
 
 class TestEntrySignals:
-    def test_volatility_overload_pauses_trading(self):
-        """변동성 과부하 시 MARKET_PAUSE."""
-        engine = make_engine()
-        snap = make_snapshot(volatility_ratio=2.5)
+    def test_high_volatility_lowers_score(self):
+        """높은 변동성은 Vol 스코어를 0으로 만든다."""
+        engine = make_engine(StrategyParams(entry_score_threshold=95.0))
+        snap = make_snapshot(volatility_ratio=3.0, rsi=20, adx=15)
         signal = engine.evaluate_entry("KRW-BTC", snap)
+        assert signal.score is not None
+        assert "Vol:0" in signal.reason
 
-        assert signal.signal == Signal.MARKET_PAUSE
-        assert "변동성 과부하" in signal.reason
-
-    def test_no_bb_breakout_history_hold(self):
-        """BB 하단 이탈 이력 없으면 HOLD."""
-        engine = make_engine()
-        snap = make_snapshot(price=49000, bb_lower=48000)
+    def test_high_adx_lowers_score(self):
+        """높은 ADX(강한 추세)는 ADX 스코어를 0으로 만든다."""
+        engine = make_engine(StrategyParams(entry_score_threshold=95.0))
+        snap = make_snapshot(adx=40.0)
         signal = engine.evaluate_entry("KRW-BTC", snap)
+        assert "ADX:0" in signal.reason
 
-        assert signal.signal == Signal.HOLD
-        assert "이탈 이력 없음" in signal.reason
-
-    def test_currently_below_bb_lower_hold(self):
-        """BB 하단 이탈 중이면 복귀 대기."""
-        engine = make_engine()
-        snap = make_snapshot(price=47000, bb_lower=48000)
+    def test_low_adx_raises_score(self):
+        """낮은 ADX(횡보)는 ADX 스코어를 100으로 만든다."""
+        engine = make_engine(StrategyParams(entry_score_threshold=95.0))
+        snap = make_snapshot(adx=15.0)
         signal = engine.evaluate_entry("KRW-BTC", snap)
+        assert "ADX:100" in signal.reason
 
-        assert signal.signal == Signal.HOLD
-        assert "이탈 중" in signal.reason
+    def test_high_rsi_lowers_score(self):
+        """높은 RSI는 RSI 스코어를 0으로 만든다."""
+        engine = make_engine(StrategyParams(entry_score_threshold=95.0))
+        snap = make_snapshot(rsi=55.0)
+        signal = engine.evaluate_entry("KRW-BTC", snap)
+        assert "RSI:0" in signal.reason
 
-    def test_bb_recovery_with_rsi_oversold_triggers_buy(self):
-        """BB 하단 이탈 후 복귀 + RSI 과매도 → 매수 신호."""
-        engine = make_engine()
-
-        # 1단계: 하단 이탈 기록
-        snap_below = make_snapshot(price=47000, bb_lower=48000, rsi=25)
-        engine.evaluate_entry("KRW-BTC", snap_below)
-
-        # 2단계: 밴드 안으로 복귀 + RSI 과매도
-        snap_recovered = make_snapshot(price=48500, bb_lower=48000, rsi=28)
-        signal = engine.evaluate_entry("KRW-BTC", snap_recovered)
-
+    def test_favorable_conditions_trigger_buy(self):
+        """모든 조건이 유리하면 높은 스코어로 BUY."""
+        # Without closes_series: BB=0, RSI slope=50 (neutral), MA=50 (neutral)
+        # Vol: (3-0.5)/2*100=125→100, MA:50, ADX:(40-10)/25*100=120→100,
+        # BB:0, RSI↗:50, RSI:(45-20)/25*100=100
+        # weighted avg = (100+50+100+0+50+100)/6 = 66.7
+        params = StrategyParams(entry_score_threshold=50.0)
+        engine = make_engine(params)
+        snap = make_snapshot(price=48500, rsi=20, adx=10, volatility_ratio=0.5)
+        signal = engine.evaluate_entry("KRW-BTC", snap)
         assert signal.signal == Signal.BUY
+        assert signal.score >= 50.0
         assert signal.stop_loss_price is not None
-        assert signal.target_price_1 is not None  # BB 중앙선
-        assert signal.target_price_2 is not None  # BB 상단선
+        assert signal.target_price_1 is not None
+        assert signal.target_price_2 is not None
 
-    def test_bb_recovery_but_rsi_too_high_hold(self):
-        """BB 복귀했지만 RSI가 과매도 구간이 아니면 HOLD."""
+    def test_score_always_in_0_100_range(self):
+        """스코어는 항상 0~100 범위."""
         engine = make_engine()
-
-        # 하단 이탈 기록
-        snap_below = make_snapshot(price=47000, bb_lower=48000)
-        engine.evaluate_entry("KRW-BTC", snap_below)
-
-        # 복귀했지만 RSI 높음
-        snap_recovered = make_snapshot(price=48500, bb_lower=48000, rsi=55)
-        signal = engine.evaluate_entry("KRW-BTC", snap_recovered)
-
-        assert signal.signal == Signal.HOLD
-        assert "과매도 구간 아님" in signal.reason
-
-    def test_different_symbols_tracked_independently(self):
-        """종목별 BB 이탈 상태는 독립적으로 추적."""
-        engine = make_engine()
-
-        # BTC 하단 이탈
-        engine.evaluate_entry("KRW-BTC", make_snapshot(price=47000, bb_lower=48000))
-
-        # ETH는 이탈 이력 없음
-        signal_eth = engine.evaluate_entry(
-            "KRW-ETH",
-            make_snapshot(price=3500, bb_lower=3000),
-        )
-        assert signal_eth.signal == Signal.HOLD
-        assert "이탈 이력 없음" in signal_eth.reason
-
-    def test_reset_tracking_clears_state(self):
-        """reset_tracking 호출 시 상태 초기화."""
-        engine = make_engine()
-
-        # 하단 이탈 기록
-        engine.evaluate_entry("KRW-BTC", make_snapshot(price=47000, bb_lower=48000))
-        engine.reset_tracking("KRW-BTC")
-
-        # 복귀해도 이력이 없으므로 HOLD
-        signal = engine.evaluate_entry(
-            "KRW-BTC",
-            make_snapshot(price=48500, bb_lower=48000, rsi=25),
-        )
-        assert signal.signal == Signal.HOLD
-
-    def test_adx_strong_trend_blocks_entry(self):
-        """ADX가 추세 임계치 초과 시 평균 회귀 진입 차단."""
-        engine = make_engine()
-
-        # 하단 이탈 기록
-        engine.evaluate_entry("KRW-BTC", make_snapshot(price=47000, bb_lower=48000))
-
-        # 복귀 + RSI 과매도이지만 ADX가 높음 (강한 추세)
-        snap = make_snapshot(price=48500, bb_lower=48000, rsi=25, adx=30.0)
+        # Extreme values
+        snap = make_snapshot(volatility_ratio=10.0, rsi=99, adx=99)
         signal = engine.evaluate_entry("KRW-BTC", snap)
+        assert signal.score is not None
+        assert 0 <= signal.score <= 100
 
-        assert signal.signal == Signal.HOLD
-        assert "ADX" in signal.reason
-
-    def test_adx_weak_trend_allows_entry(self):
-        """ADX가 낮으면 (횡보) 평균 회귀 진입 허용."""
-        engine = make_engine()
-
-        # 하단 이탈 기록
-        engine.evaluate_entry("KRW-BTC", make_snapshot(price=47000, bb_lower=48000))
-
-        # 복귀 + RSI 과매도 + ADX 낮음 (횡보장)
-        snap = make_snapshot(price=48500, bb_lower=48000, rsi=25, adx=15.0)
+    def test_weight_zero_excludes_filter(self):
+        """가중치 0인 필터는 결과에 영향 없음."""
+        # All weights 0 except RSI level
+        params = StrategyParams(
+            w_volatility=0, w_ma_trend=0, w_adx=0,
+            w_bb_recovery=0, w_rsi_slope=0, w_rsi_level=1.0,
+            entry_score_threshold=50.0,
+        )
+        engine = make_engine(params)
+        snap = make_snapshot(rsi=20)  # RSI score = (45-20)/25*100 = 100
         signal = engine.evaluate_entry("KRW-BTC", snap)
-
         assert signal.signal == Signal.BUY
+        assert signal.score == 100.0  # Only RSI level matters
+
+    def test_all_weights_zero_returns_hold(self):
+        """모든 가중치 0이면 HOLD."""
+        params = StrategyParams(
+            w_volatility=0, w_ma_trend=0, w_adx=0,
+            w_bb_recovery=0, w_rsi_slope=0, w_rsi_level=0,
+        )
+        engine = make_engine(params)
+        snap = make_snapshot(rsi=20, adx=10, volatility_ratio=0.5)
+        signal = engine.evaluate_entry("KRW-BTC", snap)
+        assert signal.signal == Signal.HOLD
+        assert signal.score == 0.0
+
+    def test_threshold_boundary(self):
+        """임계치 정확히 일치 시 BUY."""
+        # Only RSI level active, RSI=20 → score=100
+        params = StrategyParams(
+            w_volatility=0, w_ma_trend=0, w_adx=0,
+            w_bb_recovery=0, w_rsi_slope=0, w_rsi_level=1.0,
+            entry_score_threshold=100.0,
+        )
+        engine = make_engine(params)
+        snap = make_snapshot(rsi=20)  # score exactly 100
+        signal = engine.evaluate_entry("KRW-BTC", snap)
+        assert signal.signal == Signal.BUY
+
+    def test_score_field_populated(self):
+        """TradeSignal.score 필드가 채워짐."""
+        engine = make_engine()
+        snap = make_snapshot()
+        signal = engine.evaluate_entry("KRW-BTC", snap)
+        assert signal.score is not None
+        assert isinstance(signal.score, float)
+
+    def test_reason_contains_score_breakdown(self):
+        """reason 문자열에 스코어 내역 포함."""
+        engine = make_engine()
+        snap = make_snapshot()
+        signal = engine.evaluate_entry("KRW-BTC", snap)
+        assert "스코어" in signal.reason
+        assert "Vol:" in signal.reason
+        assert "MA:" in signal.reason
+        assert "ADX:" in signal.reason
+        assert "BB:" in signal.reason
+        assert "RSI↗:" in signal.reason
+        assert "RSI:" in signal.reason
 
 # ── 청산 조건 테스트 ─────────────────────────────────────────
 

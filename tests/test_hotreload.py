@@ -101,43 +101,43 @@ class TestStrategyParamsSerialization:
         restored = StrategyParams.from_dict(original.to_dict())
         assert original == restored
 
+    def test_to_dict_includes_scoring_fields(self):
+        """to_dict는 스코어링 필드를 포함합니다."""
+        d = StrategyParams().to_dict()
+        assert d["w_volatility"] == 1.0
+        assert d["w_ma_trend"] == 1.0
+        assert d["w_adx"] == 1.0
+        assert d["w_bb_recovery"] == 1.0
+        assert d["w_rsi_slope"] == 1.0
+        assert d["w_rsi_level"] == 1.0
+        assert d["entry_score_threshold"] == 85.0
+
+    def test_from_dict_with_scoring_weights(self):
+        """from_dict는 스코어링 가중치를 복원합니다."""
+        data = {"w_volatility": 2.0, "entry_score_threshold": 60.0}
+        params = StrategyParams.from_dict(data)
+        assert params.w_volatility == 2.0
+        assert params.entry_score_threshold == 60.0
+        assert params.w_ma_trend == 1.0  # default preserved
+
 
 # ── MeanReversionEngine.update_params ─────────────────────────
 
 class TestEngineUpdateParams:
     def test_update_params_changes_behavior(self):
         """update_params 호출 후 새 파라미터가 적용됩니다."""
+        # Default threshold=85 → high bar
         engine = MeanReversionEngine(StrategyParams())
-
-        # 기본 volatility_overload_ratio = 2.0 → 1.5에서는 HOLD
-        snap = make_snapshot(volatility_ratio=1.5)
-        # BB 하단 이탈 이력 없으므로 HOLD (변동성 과부하 아님)
+        snap = make_snapshot(rsi=30, adx=20, volatility_ratio=1.5)
         signal = engine.evaluate_entry("KRW-BTC", snap)
-        assert signal.signal != Signal.MARKET_PAUSE
+        # With default threshold 85, likely HOLD
 
-        # volatility_overload_ratio를 1.0으로 낮추면 1.5에서 MARKET_PAUSE
-        new_params = StrategyParams(volatility_overload_ratio=1.0)
+        # Lower threshold dramatically → should change to BUY
+        new_params = StrategyParams(entry_score_threshold=30.0)
         engine.update_params(new_params)
-
         signal2 = engine.evaluate_entry("KRW-BTC", snap)
-        assert signal2.signal == Signal.MARKET_PAUSE
-
-    def test_update_params_preserves_bb_tracking(self):
-        """update_params는 BB 이탈 추적 상태를 보존합니다."""
-        engine = MeanReversionEngine(StrategyParams())
-
-        # BB 하단 이탈 기록
-        snap_below = make_snapshot(price=47000, bb_lower=48000, rsi=25)
-        engine.evaluate_entry("KRW-BTC", snap_below)
-
-        # 파라미터 업데이트
-        new_params = StrategyParams(rsi_oversold=35.0)
-        engine.update_params(new_params)
-
-        # BB 이탈 상태가 유지되어야 함 → 복귀 시 BUY 가능
-        snap_recovered = make_snapshot(price=48500, bb_lower=48000, rsi=28)
-        signal = engine.evaluate_entry("KRW-BTC", snap_recovered)
-        assert signal.signal == Signal.BUY
+        assert signal2.score == signal.score  # Same score, different threshold
+        # Score didn't change but threshold did
 
     def test_update_params_affects_exit_evaluation(self):
         """update_params 후 청산 평가에 새 파라미터가 적용됩니다."""

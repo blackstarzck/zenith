@@ -84,6 +84,18 @@ class StrategyParams:
     regime_adx_trending_threshold: float = 25.0  # ADX ≥ 이 값이면 추세장
     regime_vol_overload_ratio: float = 2.0       # 변동성 비율 ≥ 이 값이면 변동성 폭발
     regime_lookback_candles: int = 3             # 히스테리시스 룩백 (다수결 캔들 수)
+
+    # 스코어링 가중치 (0.0 = 비활성, 높을수록 비중 큼)
+    w_volatility: float = 1.0
+    w_ma_trend: float = 1.0
+    w_adx: float = 1.0
+    w_bb_recovery: float = 1.0
+    w_rsi_slope: float = 1.0
+    w_rsi_level: float = 1.0
+
+    # 스코어링 진입 임계치 (0~100, 가중합산 스코어가 이 값 이상이면 BUY)
+    entry_score_threshold: float = 85.0
+
     def to_dict(self) -> dict:
         """StrategyParams를 딕셔너리로 변환합니다."""
         return asdict(self)
