@@ -452,15 +452,15 @@ def print_backtest_report(result: BacktestResult) -> None:
 
     # MDD 10% 이내 기준 판정
     if result.max_drawdown_pct <= 10:
-        print("  ✓ MDD 기준 통과 (≤ 10%)")
+        print("  [PASS] MDD 기준 통과 (<= 10%)")
     else:
-        print(f"  ✗ MDD 기준 미달 ({result.max_drawdown_pct:.2f}% > 10%)")
+        print(f"  [FAIL] MDD 기준 미달 ({result.max_drawdown_pct:.2f}% > 10%)")
 
     # 양의 수익률 기준
     if result.total_return_pct > 0:
-        print("  ✓ 양의 수익률 기준 통과")
+        print("  [PASS] 양의 수익률 기준 통과")
     else:
-        print("  ✗ 양의 수익률 기준 미달")
+        print("  [FAIL] 양의 수익률 기준 미달")
 
     print()
 
