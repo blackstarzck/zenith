@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react';
 import { Typography, Flex, Collapse, Table, Alert, Card, Row, Col, InputNumber, Select, Divider, Tag } from 'antd';
 import { BookOutlined } from '@ant-design/icons';
 import { GUIDE_SECTIONS } from '../lib/guideContent';
+import { GUIDE_DIAGRAMS } from '../lib/guideDiagrams';
+import MermaidDiagram from '../components/MermaidDiagram';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -72,7 +74,19 @@ export default function GuidePage() {
             </Paragraph>
           ))}
 
-          {/* 2. Tables */}
+          {/* 2. Diagrams (섹션별 Mermaid 다이어그램) */}
+          {GUIDE_DIAGRAMS[section.key]?.map((diagram, idx) => (
+            <Card
+              key={`diagram-${idx}`}
+              size="small"
+              title={diagram.title}
+              style={{ marginTop: idx === 0 ? 8 : 0 }}
+            >
+              <MermaidDiagram chart={diagram.chart} />
+            </Card>
+          ))}
+
+          {/* 3. Tables */}
           {section.content.tables?.map((table, idx) => (
             <div key={idx}>
               {table.title && (
@@ -90,15 +104,15 @@ export default function GuidePage() {
             </div>
           ))}
 
-          {/* 3. Highlights */}
+          {/* 4. Highlights */}
           {section.content.highlights?.map((highlight, idx) => (
             <Alert key={idx} type="info" showIcon message={highlight} />
           ))}
 
-          {/* 4. Formulas */}
+          {/* 5. Formulas */}
           {section.content.formulas && section.content.formulas.length > 0 && (
             <pre style={{ background: '#1a1a1a', padding: 12, borderRadius: 6, overflow: 'auto', margin: 0 }}>
-              <code>{section.content.formulas.join('\n')}</code>
+              <code>{section.content.formulas.join(String.fromCharCode(10))}</code>
             </pre>
           )}
 

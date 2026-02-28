@@ -25,6 +25,7 @@ export default defineConfig({
           'vendor-antd': ['antd', '@ant-design/icons'],
           'vendor-charts': ['@ant-design/charts'],
           'vendor-supabase': ['@supabase/supabase-js'],
+          'vendor-mermaid': ['mermaid'],
         },
       },
     },
