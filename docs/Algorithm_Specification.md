@@ -44,7 +44,64 @@
 * **진입 거부 조건:** 예상 슬리피지가 50bps(0.5%)를 초과할 경우, 진입 신호가 발생했더라도 매매를 포기합니다. 이는 '비싸게 사서 수익률을 깎아먹는' 상황을 방지하기 위함입니다.
 
 ### 진입 파이프라인 요약
+
 `시장 레짐 판정(Regime Detection)` → `임계치 동적 조정(Threshold Offset)` → `매수 신호 발생(Signal)` → `켈리 비중 계산(Kelly Sizing)` → `슬리피지 검증(Slippage Check)` → `시장가 매수 집행(Buy Market)`
+
+```mermaid
+flowchart TD
+    subgraph FILTER["1단계: 시장 필터링"]
+        F1["거래대금 상위 10개 심볼 추출<br/>(Ticker 배치 100개 → 정렬)"] --> F2["심볼별 OHLCV 수집<br/>(15분봉 × 200개)"]
+        F2 --> F3["지표 스냅샷 계산<br/>BB / RSI / ATR / ADX / MA"]
+        F3 --> F4{"쿨다운 확인<br/>(최근 매도 후 대기)"}
+        F4 -->|"대기 중"| F4X["⛔ 진입 스킵"]
+        F4 -->|"통과"| F5{"리스크 사전 검증<br/>can_enter()"}
+        F5 -->|"거부<br/>(일일정지/보유중/최대5종목)"| F5X["⛔ 진입 불가"]
+        F5 -->|"통과"| SCORE
+    end
+
+    subgraph SCORE["2단계: 6-팩터 스코어링"]
+        S1["변동성 스코어"] --> S7["가중 평균 합산<br/>total_score"]
+        S2["MA 추세 스코어"] --> S7
+        S3["ADX 스코어"] --> S7
+        S4["BB 복귀 스코어"] --> S7
+        S5["RSI 기울기 스코어"] --> S7
+        S6["RSI 수준 스코어"] --> S7
+        S7 --> S8{"total_score ≥<br/>effective_threshold?"}
+        S8 -->|"미달"| S8X["⛔ 신호 없음"]
+        S8 -->|"충족"| SIZING
+    end
+
+    subgraph REGIME["레짐 오프셋 적용"]
+        R1["BTC 15분봉 분석"] --> R2{"시장 레짐 판정"}
+        R2 -->|"횡보장"| R3["오프셋 +0"]
+        R2 -->|"추세장<br/>ADX≥25"| R4["오프셋 +15"]
+        R2 -->|"변동성 폭발<br/>vol≥2×"| R5["오프셋 +25"]
+        R3 & R4 & R5 --> R6["effective_threshold<br/>= min(base + offset, 99)"]
+    end
+
+    R6 -.->|"임계치 전달"| S8
+
+    subgraph SIZING["3단계: 포지션 사이징"]
+        K1{"매매 기록 ≥ 30회?"}
+        K1 -->|"예"| K2["Kelly Criterion<br/>Half-Kelly (50%) 적용"]
+        K1 -->|"아니오"| K3["고정 비중 20%"]
+        K2 & K3 --> K4["투입 금액 산출"]
+    end
+
+    subgraph SLIP["4단계: 슬리피지 검증"]
+        K4 --> SL1["호가창 Walk-the-book<br/>시뮬레이션"]
+        SL1 --> SL2{"슬리피지 ≤ 50bps?"}
+        SL2 -->|"초과"| SL3["⛔ 매수 포기"]
+        SL2 -->|"이하"| BUY["✅ 시장가 매수 집행"]
+    end
+
+    subgraph POST["5단계: 사후 처리"]
+        BUY --> P1["체결 대기 (2초 폴링)"]
+        P1 --> P2["Supabase 거래 기록"]
+        P1 --> P3["KakaoTalk 매수 알림"]
+        P1 --> P4["Risk Manager 포지션 등록"]
+    end
+```
 ---
 
 ## 2. 청산 알고리즘 (Exit Logic)
@@ -61,7 +118,48 @@
 * **시장 호흡 기반 손절(ATR 활용):** 고정된 -3% 손절 대신, 최근 시장의 평균적인 흔들림 폭(ATR)을 계산하여 그 폭의 2.5배 이상 가격이 떨어지면 즉시 매도합니다.
 * **비유:** 시장이 평소보다 거칠게 숨을 쉰다면 손절 범위를 넓게 잡고, 시장이 조용하다면 좁게 잡아 불필요한 손절을 방지하는 '유연한 방어막'입니다.
 
+### 청산 파이프라인 요약
 
+```mermaid
+flowchart TD
+    subgraph MONITOR["포지션 모니터링"]
+        M1["보유 포지션 순회"] --> M2["OHLCV 수집 (15분봉 × 200)"]
+        M2 --> M3["지표 스냅샷 갱신<br/>BB / RSI / ATR / ADX"]
+        M3 --> M4["트레일링 고점 갱신<br/>update_trailing_high()"]
+    end
+
+    subgraph HARD["하드 룰 (즉시 매도)"]
+        M4 --> H1{"ATR 손절<br/>현재가 ≤ 진입가 - ATR×2.5?"}
+        H1 -->|"예"| H2["🔴 즉시 전량 매도<br/>(STOP_LOSS)"]
+        H1 -->|"아니오"| H3{"트레일링 스탑<br/>(반매도 후 활성)<br/>현재가 ≤ 고점 - ATR×2.0?"}
+        H3 -->|"예"| H4["🔴 잔량 전량 매도<br/>(TRAILING_STOP)"]
+        H3 -->|"아니오"| EXIT_SCORE
+    end
+
+    subgraph EXIT_SCORE["4-팩터 청산 스코어링"]
+        E1["RSI 수준 스코어"] --> E5["가중 평균 합산<br/>exit_score"]
+        E2["BB 위치 스코어"] --> E5
+        E3["수익률 스코어"] --> E5
+        E4["ADX 스코어"] --> E5
+        E5 --> E6{"exit_score ≥<br/>exit_threshold?"}
+        E6 -->|"미달"| E7["⏳ 홀딩 유지"]
+        E6 -->|"충족"| E8{"최소 수익률<br/>min_profit_margin 충족?"}
+        E8 -->|"미달"| E7
+        E8 -->|"충족"| E9{"이미 반매도<br/>했는가?"}
+        E9 -->|"아니오"| E10["🟡 50% 매도<br/>(SELL_HALF)"]
+        E9 -->|"예"| E11["🟢 잔량 전량 매도<br/>(SELL_ALL)"]
+    end
+
+    subgraph POST["사후 처리"]
+        H2 & H4 & E10 & E11 --> P1["실제 잔고 조회<br/>get_balance()"]
+        P1 --> P2["시장가 매도 집행"]
+        P2 --> P3["PnL 계산 (수수료 반영)"]
+        P3 --> P4["일일 손실 한도 체크<br/>record_realized_pnl()"]
+        P3 --> P5["Supabase 거래 기록"]
+        P3 --> P6["KakaoTalk 매도 알림"]
+        E10 --> P7["mark_half_sold()<br/>→ 트레일링 활성화"]
+    end
+```
 
 ---
 

@@ -33,9 +33,100 @@
 - **Supabase DB:** 매매 기록, 일별 손익, 시스템 로그 영구 저장.
 
 ## 4. 데이터 흐름
-1. [Upbit] -> 시세 데이터 수집 -> [Python Engine]
-2. [Python Engine] -> 전략 연산 -> 매매 신호 생성
-3. [Python Engine] -> **[Risk Manager]** 켈리 비중 산출 및 슬리피지 검증
-4. [Python Engine] -> [Upbit] 주문 전송 & [Supabase] 기록 저장
-5. [Supabase] -> **[React/AntD Dashboard]** 실시간 데이터 시각화
-6. [Python Engine] -> [KakaoTalk] 매매 결과 알림 전송
+
+### 4.1 시스템 아키텍처 개요
+
+아래 다이어그램은 전체 시스템의 구성 요소와 데이터 흐름을 보여줍니다.
+
+```mermaid
+graph TB
+    subgraph EXT["외부 서비스"]
+        UPBIT["Upbit API<br/>(REST + WebSocket)"]
+        KAKAO["KakaoTalk API<br/>(나에게 보내기)"]
+    end
+
+    subgraph PY["Python 백엔드 — 로컬 상시 구동"]
+        ORCH["Orchestrator<br/>10초 메인 루프"]
+        COLL["Data Collector<br/>시세/호가 수집"]
+        STRAT["Strategy Engine<br/>6-팩터 스코어링"]
+        REGIME["Regime Detector<br/>BTC 시장 레짐"]
+        RISK["Risk Manager<br/>켈리/리스크 관리"]
+        EXEC["Order Executor<br/>시장가 주문 집행"]
+        NOTI["Notifier<br/>카카오톡 알림"]
+    end
+
+    subgraph DB["Supabase — PostgreSQL"]
+        TABLES["trades / daily_stats / bot_state<br/>system_logs / price_snapshots<br/>balance_snapshots"]
+    end
+
+    subgraph FE["React + AntD 대시보드"]
+        HOOKS["useSupabase<br/>Realtime 구독"]
+        TICKER["useUpbitTicker<br/>WebSocket 시세"]
+        UI["Dashboard UI"]
+    end
+
+    UPBIT -->|"REST: 시세/호가/잔고"| COLL
+    ORCH --> COLL
+    ORCH --> STRAT
+    ORCH --> REGIME
+    ORCH --> RISK
+    ORCH --> EXEC
+    EXEC -->|"시장가 주문"| UPBIT
+    EXEC --> NOTI
+    NOTI -->|"매매 알림"| KAKAO
+    COLL --> TABLES
+    EXEC --> TABLES
+    ORCH --> TABLES
+    TABLES -->|"Realtime 구독"| HOOKS
+    UPBIT -->|"WebSocket 시세"| TICKER
+    HOOKS --> UI
+    TICKER --> UI
+    UI -->|"strategy_params 수정"| TABLES
+    TABLES -.->|"~1분 폴링 hot reload"| ORCH
+```
+
+### 4.2 데이터 흐름 상세
+
+수집 → 연산 → 집행 → 저장 → 시각화의 5단계 파이프라인을 거칩니다.
+
+```mermaid
+flowchart TD
+    subgraph COLLECT["1단계: 데이터 수집"]
+        A1["Upbit REST API"] -->|"Ticker 배치 100개"| A2["거래대금 상위 10개 심볼"]
+        A1 -->|"15분봉 200개"| A3["OHLCV 캔들 데이터"]
+        A1 -->|"호가창 조회"| A4["Orderbook 데이터"]
+    end
+
+    subgraph COMPUTE["2단계: 전략 연산"]
+        A3 --> B1["지표 계산<br/>BB / RSI / ATR / ADX / MA"]
+        B1 --> B2["6-팩터 스코어링 → 매매 신호"]
+    end
+
+    subgraph EXECUTE["3단계: 주문 집행"]
+        A4 --> C1["슬리피지 검증<br/>50bps 이하"]
+        B2 --> C1
+        C1 --> C2["시장가 주문<br/>Upbit API"]
+    end
+
+    subgraph STORE["4단계: 저장 및 알림"]
+        C2 --> D1["Supabase DB 기록"]
+        C2 --> D2["KakaoTalk 매매 알림"]
+    end
+
+    subgraph VIEW["5단계: 실시간 시각화"]
+        D1 -->|"Realtime 구독"| E1["React 대시보드"]
+        E2["Upbit WebSocket<br/>500ms 버퍼"] --> E1
+        E1 -->|"전략 파라미터 수정"| D1
+    end
+```
+
+### 4.3 흐름 요약
+
+1. **[Upbit]** → 시세 데이터 수집 → **[Python Engine]**
+2. **[Python Engine]** → 전략 연산 → 매매 신호 생성
+3. **[Python Engine]** → **[Risk Manager]** 켈리 비중 산출 및 슬리피지 검증
+4. **[Python Engine]** → **[Upbit]** 주문 전송 & **[Supabase]** 기록 저장
+5. **[Supabase]** → **[React/AntD Dashboard]** 실시간 데이터 시각화 (Realtime 구독)
+6. **[Upbit WebSocket]** → **[React Dashboard]** 실시간 시세 수신 (500ms 버퍼)
+7. **[React Dashboard]** → **[Supabase]** 전략 파라미터 수정 → **[Python Engine]** ~1분 폴링 반영
+8. **[Python Engine]** → **[KakaoTalk]** 매매 결과 알림 전송
