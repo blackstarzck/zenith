@@ -140,9 +140,9 @@ export default function MermaidDiagram({ chart }: MermaidDiagramProps) {
         </button>
       </div>
       <TransformWrapper ref={zoomRef} initialScale={fitScale} minScale={0.3} maxScale={2}
-        centerOnInit={true} wheel={{ disabled: true }}>
-        <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}
-          contentStyle={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        centerOnInit={true} wheel={{ disabled: true }}
+        limitToBounds={false} alignmentAnimation={{ disabled: true }}>
+        <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
           <div dangerouslySetInnerHTML={{ __html: svg }} />
         </TransformComponent>
       </TransformWrapper>
