@@ -79,6 +79,6 @@ export async function saveStrategyParams(params: StrategyParams): Promise<boolea
 
 ## Final Verification Wave
 
-- [ ] `npx tsc --noEmit` 통과
-- [ ] 변경 파일 1개: `frontend/src/lib/strategyParams.ts`
-- [ ] 호출처 3곳 시그니처 영향 없음 확인 (반환 타입 `Promise<boolean>` 동일)
+- [x] `npx tsc --noEmit` 통과
+- [x] 변경 파일 1개: `frontend/src/lib/strategyParams.ts`
+- [x] 호출처 3곳 시그니처 영향 없음 확인 (반환 타입 `Promise<boolean>` 동일)
