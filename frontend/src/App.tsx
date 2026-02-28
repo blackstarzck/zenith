@@ -13,6 +13,7 @@ const TradingPage = lazy(() => import('./pages/TradingPage'));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
+const GuidePage = lazy(() => import('./pages/GuidePage'));
 
 /* ── Auth Guard ─────────────────────────────────────────── */
 
@@ -68,6 +69,7 @@ export default function App() {
                 <Route path="analytics" element={<AnalyticsPage />} />
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="reports" element={<ReportsPage />} />
+                <Route path="guide" element={<GuidePage />} />
               </Route>
 
               {/* Fallback */}

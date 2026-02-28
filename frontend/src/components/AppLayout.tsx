@@ -17,6 +17,7 @@ import {
   RightOutlined,
   InfoCircleOutlined,
   FileTextOutlined,
+  BookOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -34,6 +35,7 @@ const menuItems = [
   { key: '/analytics', icon: <BarChartOutlined />, label: 'Analytics' },
   { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
   { key: '/reports', icon: <FileTextOutlined />, label: 'Reports' },
+  { key: '/guide', icon: <BookOutlined />, label: 'Guide' },
 ];
 
 /* ── 업비트 · 카카오 상태 라벨 ─────────────────────────── */
