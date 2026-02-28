@@ -57,6 +57,11 @@ export interface StrategyParams {
   trailing_stop_atr_multiplier?: number;
   take_profit_sell_ratio?: number;
   min_profit_margin?: number;
+  // 시장 레짐 설정
+  regime_adx_trending_threshold?: number;
+  regime_vol_overload_ratio?: number;
+  regime_trending_offset?: number;
+  regime_volatile_offset?: number;
 }
 
 
@@ -510,6 +515,52 @@ export default function StrategyEditModal({
             </Form.Item>
             <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
               1차 익절 실행을 위한 최소 수익률입니다. 수수료(0.1%) + 알파.
+            </Text>
+          </Col>
+        </Row>
+        {/* ── 시장 레짐 설정 ── */}
+        <Divider titlePlacement="left" plain>
+          시장 레짐 설정
+        </Divider>
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="BTC 기준으로 시장 상태를 판단하여 진입 임계치를 동적으로 조정합니다. 추세장/변동성 폭발 시 임계치를 높여 더 확실한 기회만 포착합니다."
+        />
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item label="ADX 추세장 기준" name="regime_adx_trending_threshold">
+              <InputNumber min={20} max={45} step={1} style={{ width: '100%' }} />
+            </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              BTC의 ADX가 이 값 이상이면 추세장으로 판단합니다.
+            </Text>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="변동성 폭발 기준" name="regime_vol_overload_ratio">
+              <InputNumber min={1.5} max={4.0} step={0.1} style={{ width: '100%' }} />
+            </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              변동성 비율이 이 값 이상이면 변동성 폭발로 판단합니다.
+            </Text>
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item label="추세장 임계치 가산" name="regime_trending_offset">
+              <InputNumber min={0} max={30} step={1} style={{ width: '100%' }} />
+            </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              추세장에서 진입 임계치를 이 값만큼 높입니다. 높을수록 진입이 어려워집니다.
+            </Text>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="변동성 폭발 임계치 가산" name="regime_volatile_offset">
+              <InputNumber min={0} max={30} step={1} style={{ width: '100%' }} />
+            </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              변동성 폭발 시 진입 임계치를 이 값만큼 높입니다. 높을수록 진입이 어려워집니다.
             </Text>
           </Col>
         </Row>

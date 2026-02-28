@@ -24,28 +24,33 @@ export const DEFAULT_STRATEGY: StrategyParams = {
   trailing_stop_atr_multiplier: 2.0,
   take_profit_sell_ratio: 0.5,
   min_profit_margin: 0.003,
+  // 시장 레짐 설정
+  regime_adx_trending_threshold: 25,
+  regime_vol_overload_ratio: 2.0,
+  regime_trending_offset: 15,
+  regime_volatile_offset: 25,
 };
 
 export const PRESETS: { name: string; description: string; params: StrategyParams }[] = [
   {
     name: '보수적',
     description: '낮은 빈도, 안전 우선',
-    params: { bb_period: 20, bb_std_dev: 2.5, rsi_period: 14, rsi_oversold: 25, atr_period: 14, atr_stop_multiplier: 3.0, top_volume_count: 5, w_volatility: 1.5, w_ma_trend: 1.0, w_adx: 1.0, w_bb_recovery: 2.0, w_rsi_slope: 1.0, w_rsi_level: 1.5, entry_score_threshold: 90, w_exit_rsi_level: 1.5, w_exit_bb_position: 2.0, w_exit_profit_pct: 1.0, w_exit_adx_trend: 1.0, exit_score_threshold: 60, trailing_stop_atr_multiplier: 1.5, take_profit_sell_ratio: 0.5, min_profit_margin: 0.005 },
+    params: { bb_period: 20, bb_std_dev: 2.5, rsi_period: 14, rsi_oversold: 25, atr_period: 14, atr_stop_multiplier: 3.0, top_volume_count: 5, w_volatility: 1.5, w_ma_trend: 1.0, w_adx: 1.0, w_bb_recovery: 2.0, w_rsi_slope: 1.0, w_rsi_level: 1.5, entry_score_threshold: 90, w_exit_rsi_level: 1.5, w_exit_bb_position: 2.0, w_exit_profit_pct: 1.0, w_exit_adx_trend: 1.0, exit_score_threshold: 60, trailing_stop_atr_multiplier: 1.5, take_profit_sell_ratio: 0.5, min_profit_margin: 0.005, regime_adx_trending_threshold: 25, regime_vol_overload_ratio: 2.0, regime_trending_offset: 20, regime_volatile_offset: 30 },
   },
   {
     name: '공격적',
     description: '높은 빈도, 수익 극대화',
-    params: { bb_period: 15, bb_std_dev: 1.5, rsi_period: 10, rsi_oversold: 35, atr_period: 10, atr_stop_multiplier: 2.0, top_volume_count: 15, w_volatility: 0.5, w_ma_trend: 0.5, w_adx: 0.5, w_bb_recovery: 1.0, w_rsi_slope: 1.0, w_rsi_level: 1.0, entry_score_threshold: 55, w_exit_rsi_level: 0.5, w_exit_bb_position: 1.0, w_exit_profit_pct: 1.5, w_exit_adx_trend: 0.5, exit_score_threshold: 80, trailing_stop_atr_multiplier: 2.5, take_profit_sell_ratio: 0.5, min_profit_margin: 0.002 },
+    params: { bb_period: 15, bb_std_dev: 1.5, rsi_period: 10, rsi_oversold: 35, atr_period: 10, atr_stop_multiplier: 2.0, top_volume_count: 15, w_volatility: 0.5, w_ma_trend: 0.5, w_adx: 0.5, w_bb_recovery: 1.0, w_rsi_slope: 1.0, w_rsi_level: 1.0, entry_score_threshold: 55, w_exit_rsi_level: 0.5, w_exit_bb_position: 1.0, w_exit_profit_pct: 1.5, w_exit_adx_trend: 0.5, exit_score_threshold: 80, trailing_stop_atr_multiplier: 2.5, take_profit_sell_ratio: 0.5, min_profit_margin: 0.002, regime_adx_trending_threshold: 25, regime_vol_overload_ratio: 2.0, regime_trending_offset: 5, regime_volatile_offset: 10 },
   },
   {
     name: '횡보장',
     description: '박스권 최적화',
-    params: { bb_period: 25, bb_std_dev: 2.0, rsi_period: 14, rsi_oversold: 28, atr_period: 14, atr_stop_multiplier: 2.5, top_volume_count: 8, w_volatility: 1.0, w_ma_trend: 0.5, w_adx: 2.0, w_bb_recovery: 2.0, w_rsi_slope: 1.0, w_rsi_level: 1.0, entry_score_threshold: 70, w_exit_rsi_level: 1.0, w_exit_bb_position: 2.0, w_exit_profit_pct: 1.0, w_exit_adx_trend: 0.5, exit_score_threshold: 65, trailing_stop_atr_multiplier: 2.0, take_profit_sell_ratio: 0.5, min_profit_margin: 0.003 },
+    params: { bb_period: 25, bb_std_dev: 2.0, rsi_period: 14, rsi_oversold: 28, atr_period: 14, atr_stop_multiplier: 2.5, top_volume_count: 8, w_volatility: 1.0, w_ma_trend: 0.5, w_adx: 2.0, w_bb_recovery: 2.0, w_rsi_slope: 1.0, w_rsi_level: 1.0, entry_score_threshold: 70, w_exit_rsi_level: 1.0, w_exit_bb_position: 2.0, w_exit_profit_pct: 1.0, w_exit_adx_trend: 0.5, exit_score_threshold: 65, trailing_stop_atr_multiplier: 2.0, take_profit_sell_ratio: 0.5, min_profit_margin: 0.003, regime_adx_trending_threshold: 25, regime_vol_overload_ratio: 2.0, regime_trending_offset: 15, regime_volatile_offset: 25 },
   },
   {
     name: '변동성 장세',
     description: '급등락 대응',
-    params: { bb_period: 15, bb_std_dev: 2.5, rsi_period: 10, rsi_oversold: 25, atr_period: 10, atr_stop_multiplier: 3.5, top_volume_count: 5, w_volatility: 2.0, w_ma_trend: 1.0, w_adx: 1.0, w_bb_recovery: 1.5, w_rsi_slope: 1.5, w_rsi_level: 1.5, entry_score_threshold: 75, w_exit_rsi_level: 1.5, w_exit_bb_position: 1.5, w_exit_profit_pct: 2.0, w_exit_adx_trend: 1.5, exit_score_threshold: 60, trailing_stop_atr_multiplier: 1.5, take_profit_sell_ratio: 0.5, min_profit_margin: 0.003 },
+    params: { bb_period: 15, bb_std_dev: 2.5, rsi_period: 10, rsi_oversold: 25, atr_period: 10, atr_stop_multiplier: 3.5, top_volume_count: 5, w_volatility: 2.0, w_ma_trend: 1.0, w_adx: 1.0, w_bb_recovery: 1.5, w_rsi_slope: 1.5, w_rsi_level: 1.5, entry_score_threshold: 75, w_exit_rsi_level: 1.5, w_exit_bb_position: 1.5, w_exit_profit_pct: 2.0, w_exit_adx_trend: 1.5, exit_score_threshold: 60, trailing_stop_atr_multiplier: 1.5, take_profit_sell_ratio: 0.5, min_profit_margin: 0.003, regime_adx_trending_threshold: 25, regime_vol_overload_ratio: 2.0, regime_trending_offset: 10, regime_volatile_offset: 15 },
   },
 ];
 
@@ -56,6 +61,7 @@ export function getActivePresetName(params: StrategyParams): string | null {
     'w_volatility', 'w_ma_trend', 'w_adx', 'w_bb_recovery', 'w_rsi_slope', 'w_rsi_level', 'entry_score_threshold',
     'w_exit_rsi_level', 'w_exit_bb_position', 'w_exit_profit_pct', 'w_exit_adx_trend',
     'exit_score_threshold', 'trailing_stop_atr_multiplier', 'take_profit_sell_ratio', 'min_profit_margin',
+    'regime_adx_trending_threshold', 'regime_vol_overload_ratio', 'regime_trending_offset', 'regime_volatile_offset',
   ];
   for (const preset of PRESETS) {
     if (keys.every((k) => preset.params[k] === params[k])) return preset.name;
