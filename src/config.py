@@ -81,6 +81,9 @@ class StrategyParams:
     regime_adx_trending_threshold: float = 25.0  # ADX ≥ 이 값이면 추세장
     regime_vol_overload_ratio: float = 2.0       # 변동성 비율 ≥ 이 값이면 변동성 폭발
     regime_lookback_candles: int = 3             # 히스테리시스 룩백 (다수결 캔들 수)
+    # 하이브리드 레짐 오프셋 (레짐 상태별 진입 임계치 가산값)
+    regime_trending_offset: float = 15.0   # 추세장 시 entry_score_threshold에 가산
+    regime_volatile_offset: float = 25.0   # 변동성 폭발 시 entry_score_threshold에 가산
 
     # 스코어링 가중치 (0.0 = 비활성, 높을수록 비중 큼)
     w_volatility: float = 1.0

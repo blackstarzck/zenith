@@ -63,6 +63,7 @@ class MeanReversionEngine:
         symbol: str,
         snapshot: IndicatorSnapshot,
         closes_series: "pd.Series | None" = None,
+        threshold_offset: float = 0.0,
     ) -> TradeSignal:
         """매수 진입 조건을 스코어링 방식으로 평가합니다.
 
@@ -109,12 +110,15 @@ class MeanReversionEngine:
         reason_str = f"스코어 {total_score:.1f} ({breakdown})"
 
         # ── 임계치 비교 ──
-        if total_score >= params.entry_score_threshold:
+        # ── effective threshold 계산 (레짐 오프셋 + 99 캡) ──
+        effective_threshold = min(params.entry_score_threshold + threshold_offset, 99.0)
+
+        if total_score >= effective_threshold:
             stop_loss = price - (snapshot.atr * params.atr_stop_multiplier)
             return TradeSignal(
                 signal=Signal.BUY,
                 symbol=symbol,
-                reason=f"{reason_str} ≥ {params.entry_score_threshold:.1f}",
+                reason=f"{reason_str} ≥ {effective_threshold:.1f}" + (f" (기본 {params.entry_score_threshold:.1f} + 레짐 {threshold_offset:+.0f})" if threshold_offset > 0 else ""),
                 price=price,
                 stop_loss_price=stop_loss,
                 target_price_1=bb.middle,
@@ -125,7 +129,7 @@ class MeanReversionEngine:
         return TradeSignal(
             signal=Signal.HOLD,
             symbol=symbol,
-            reason=f"{reason_str} < {params.entry_score_threshold:.1f}",
+            reason=f"{reason_str} < {effective_threshold:.1f}",
             price=price,
             score=total_score,
         )

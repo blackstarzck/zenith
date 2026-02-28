@@ -279,14 +279,18 @@ class Orchestrator:
 
     def _evaluate_entries(self) -> None:
         """미보유 종목의 진입 조건을 평가합니다."""
-        # 레짐 기반 진입 필터 (trending/volatile → 신규 진입 차단)
-        if self._current_regime in ("trending", "volatile"):
-            if self._loop_count % 60 == 1:  # 10분에 1번만 로그
-                logger.info(
-                    "[진입 차단] 시장 레짐 '%s' — 신규 진입 대기 중",
-                    self._current_regime,
-                )
-            return
+        # 레짐 기반 threshold offset 계산 (하이브리드 필터)
+        regime_offset = 0.0
+        if self._current_regime == "trending":
+            regime_offset = self._config.strategy.regime_trending_offset
+        elif self._current_regime == "volatile":
+            regime_offset = self._config.strategy.regime_volatile_offset
+
+        if regime_offset > 0 and self._loop_count % 60 == 1:
+            logger.info(
+                "[레짐 오프셋] 시장 레짐 '%s' — 진입 임계치 +%.0f 적용 중",
+                self._current_regime, regime_offset,
+            )
 
         try:
             current_balance = self._get_total_balance_krw()
@@ -368,6 +372,7 @@ class Orchestrator:
 
                 signal = self._strategy.evaluate_entry(
                     symbol, snapshot, closes,
+                    threshold_offset=regime_offset,
                 )
 
                 if signal.signal == Signal.BUY:
