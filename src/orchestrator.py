@@ -254,9 +254,11 @@ class Orchestrator:
                     adx_period=self._config.strategy.adx_period,
                 )
 
-                signal = self._strategy.evaluate_exit(
-                    symbol, snapshot, pos.entry_price, pos.has_sold_half,
-                )
+                # 트레일링 고점 업데이트 (evaluate_exit 호출 전)
+                self._risk.update_trailing_high(symbol, snapshot.current_price)
+
+                # Position 객체 직접 전달
+                signal = self._strategy.evaluate_exit(symbol, snapshot, pos)
 
                 if signal.signal == Signal.STOP_LOSS:
                     self._execute_sell_all(symbol, pos, signal.reason, label="손절 매도")
@@ -507,7 +509,8 @@ class Orchestrator:
             return
 
         current_price = self._collector.get_current_price(symbol) or pos.entry_price
-        half_volume = actual_volume * 0.5
+        sell_ratio = self._config.strategy.take_profit_sell_ratio
+        half_volume = actual_volume * sell_ratio
         half_amount = half_volume * current_price
         full_amount = actual_volume * current_price
         min_order = self._config.risk.min_order_amount_krw
@@ -531,12 +534,12 @@ class Orchestrator:
 
         logger.info("[1차 익절] %s | 사유: %s", symbol, reason)
 
-        result = self._executor.sell_half(symbol, actual_volume)
+        result = self._executor.sell_half(symbol, actual_volume, ratio=self._config.strategy.take_profit_sell_ratio)
         if not result.success:
             logger.error("[1차 익절 실패] %s: %s", symbol, result.error)
             return
 
-        self._risk.mark_half_sold(symbol)
+        self._risk.mark_half_sold(symbol, current_price=result.price)
 
         # 실현 손익 계산 (매수 수수료 비례 배분 포함)
         buy_fee_share = pos.entry_fee * (result.volume / pos.volume) if pos.volume > 0 else 0.0

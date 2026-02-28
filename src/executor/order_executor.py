@@ -188,7 +188,10 @@ class OrderExecutor:
                 error=str(e),
             )
 
-    def sell_half(self, symbol: str, total_volume: float) -> OrderResult:
+    def sell_half(self, symbol: str, total_volume: float, ratio: float = 0.5) -> OrderResult:
+        """보유 수량의 지정 비율을 시장가 매도합니다."""
+        sell_volume = total_volume * ratio
+        return self.sell_market(symbol, sell_volume)
         """보유 수량의 50%를 시장가 매도합니다."""
         half_volume = total_volume * 0.5
         return self.sell_market(symbol, half_volume)

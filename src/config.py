@@ -52,9 +52,6 @@ class StrategyParams:
     # 변동성 과부하 필터: 24h 변동성이 20일 평균의 N배 초과 시 매매 중단
     volatility_overload_ratio: float = 2.0
 
-    # 분할 익절 비율
-    take_profit_ratio_1st: float = 0.5  # 중앙선 도달 시 50% 매도
-    take_profit_ratio_2nd: float = 1.0  # 상단선 도달 시 나머지 전량 매도
 
     # 최소 익절 마진 (수수료 0.1% + 알파 0.2% = 0.3%)
     min_profit_margin: float = 0.003
@@ -95,6 +92,20 @@ class StrategyParams:
 
     # 스코어링 진입 임계치 (0~100, 가중합산 스코어가 이 값 이상이면 BUY)
     entry_score_threshold: float = 70.0
+    # 매도 청산 스코어링 가중치 (0.0 = 비활성, 높을수록 비중 큼)
+    w_exit_rsi_level: float = 1.0       # RSI 과매수 → 높은 청산 점수
+    w_exit_bb_position: float = 1.0     # BB 상단 접근 → 높은 청산 점수
+    w_exit_profit_pct: float = 1.0      # 수익률 높을수록 → 높은 청산 점수
+    w_exit_adx_trend: float = 1.0       # 강한 추세(ADX 높음) → 추세 전환 경고
+
+    # 매도 청산 임계치 (0~100, 가중합산 스코어가 이 값 이상이면 익절)
+    exit_score_threshold: float = 70.0
+
+    # 트레일링 스탑 (1차 익절 후 활성화)
+    trailing_stop_atr_multiplier: float = 2.0  # 고점 대비 ATR * N 하락 시 전량 매도
+
+    # 분할 매도 비율 (SELL_HALF 시 매도 비율)
+    take_profit_sell_ratio: float = 0.5
 
     def to_dict(self) -> dict:
         """StrategyParams를 딕셔너리로 변환합니다."""

@@ -8,6 +8,7 @@ import pandas as pd
 from src.config import StrategyParams
 from src.strategy.engine import MeanReversionEngine, Signal, TradeSignal
 from src.strategy.indicators import BollingerBands, IndicatorSnapshot
+from src.risk.manager import Position
 
 
 # ── 헬퍼 ─────────────────────────────────────────────────────
@@ -39,6 +40,23 @@ def make_snapshot(
 
 def make_engine(params: StrategyParams | None = None) -> MeanReversionEngine:
     return MeanReversionEngine(params or StrategyParams())
+def make_position(
+    symbol: str = "KRW-BTC",
+    entry_price: float = 50000,
+    volume: float = 1.0,
+    amount: float = 50000,
+    has_sold_half: bool = False,
+    trailing_high: float = 0.0,
+) -> Position:
+    return Position(
+        symbol=symbol,
+        entry_price=entry_price,
+        volume=volume,
+        amount=amount,
+        has_sold_half=has_sold_half,
+        trailing_high=trailing_high,
+    )
+
 
 
 # ── 진입 조건 테스트 ─────────────────────────────────────────
@@ -165,54 +183,114 @@ class TestExitSignals:
         """가격이 ATR 기반 손절선 이하면 STOP_LOSS."""
         engine = make_engine()
         snap = make_snapshot(price=47000, atr=500)
-        # 진입가 50000, 손절선 = 50000 - 500 * 2.5 = 48750
-        signal = engine.evaluate_exit("KRW-BTC", snap, entry_price=50000)
-
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
         assert signal.signal == Signal.STOP_LOSS
         assert "동적 손절" in signal.reason
 
-    def test_bb_upper_triggers_sell_all(self):
-        """가격이 BB 상단선에 도달하면 SELL_ALL."""
+    def test_high_score_triggers_sell_all(self):
+        """높은 매도 스코어 + 이미 1차 익절 완료 시 SELL_ALL."""
         engine = make_engine()
-        snap = make_snapshot(price=52500, bb_upper=52000, atr=500)
-        signal = engine.evaluate_exit("KRW-BTC", snap, entry_price=50000)
-
+        snap = make_snapshot(price=52500, bb_upper=52000, atr=500, rsi=75, adx=35)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000, has_sold_half=True))
         assert signal.signal == Signal.SELL_ALL
 
-    def test_bb_middle_triggers_sell_half_first_time(self):
-        """BB 중앙선 도달 + 아직 1차 익절 안했으면 SELL_HALF."""
-        engine = make_engine()
-        snap = make_snapshot(price=50500, bb_middle=50000, atr=500)
-        signal = engine.evaluate_exit(
-            "KRW-BTC", snap, entry_price=48000, has_sold_half=False,
-        )
-
+    def test_high_score_triggers_sell_half(self):
+        """높은 매도 스코어 + 1차 익절 미완료 시 SELL_HALF."""
+        engine = make_engine(StrategyParams(exit_score_threshold=40.0))
+        snap = make_snapshot(price=50500, bb_middle=50000, bb_upper=52000, atr=500, rsi=65, adx=30)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=48000))
         assert signal.signal == Signal.SELL_HALF
 
-    def test_bb_middle_already_sold_half_hold(self):
-        """1차 익절 이미 완료 시, 중앙선에서 HOLD."""
-        engine = make_engine()
-        snap = make_snapshot(price=50500, bb_middle=50000, atr=500)
-        signal = engine.evaluate_exit(
-            "KRW-BTC", snap, entry_price=48000, has_sold_half=True,
-        )
-
+    def test_low_score_holds(self):
+        """낮은 매도 스코어 시 HOLD."""
+        engine = make_engine(StrategyParams(exit_score_threshold=90.0))
+        snap = make_snapshot(price=50500, bb_middle=50000, bb_upper=52000, atr=500, rsi=45, adx=22)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
         assert signal.signal == Signal.HOLD
 
-    def test_stop_loss_priority_over_take_profit(self):
-        """손절 조건이 익절보다 우선."""
+    def test_stop_loss_priority_over_scoring(self):
+        """손절 조건이 스코어링보다 우선."""
         engine = make_engine()
-        # 가격이 BB 상단 위이지만 손절선 이하 (비현실적이지만 우선순위 테스트)
-        snap = make_snapshot(price=44000, bb_upper=45000, atr=500)
-        signal = engine.evaluate_exit("KRW-BTC", snap, entry_price=50000)
-
+        snap = make_snapshot(price=44000, bb_upper=45000, atr=500, rsi=80, adx=40)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
         assert signal.signal == Signal.STOP_LOSS
 
-    def test_hold_when_no_exit_condition(self):
-        """청산 조건 미충족 시 HOLD."""
+    def test_hold_when_score_below_threshold(self):
+        """청산 스코어 미달 시 HOLD."""
         engine = make_engine()
-        snap = make_snapshot(price=49500, bb_middle=50000, bb_upper=52000, atr=500)
-        signal = engine.evaluate_exit("KRW-BTC", snap, entry_price=49000)
-
+        snap = make_snapshot(price=49500, bb_middle=50000, bb_upper=52000, atr=500, rsi=45, adx=20)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=49000))
         assert signal.signal == Signal.HOLD
         assert signal.stop_loss_price is not None
+
+    # ── 신규 테스트 ──────────────────────────────────────────────
+
+    def test_exit_scoring_above_threshold(self):
+        """스코어 >= threshold, has_sold_half=False → SELL_HALF."""
+        engine = make_engine()
+        snap = make_snapshot(price=52500, bb_upper=52000, bb_lower=48000, atr=500, rsi=80, adx=35)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
+        assert signal.signal == Signal.SELL_HALF
+        assert signal.score is not None
+        assert signal.score >= 70.0
+
+    def test_exit_scoring_below_threshold(self):
+        """스코어 < threshold → HOLD."""
+        engine = make_engine(StrategyParams(exit_score_threshold=95.0))
+        snap = make_snapshot(price=50100, bb_upper=52000, bb_lower=48000, atr=500, rsi=50, adx=25)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
+        assert signal.signal == Signal.HOLD
+        assert signal.score is not None
+        assert signal.score < 95.0
+
+    def test_exit_scoring_sell_all_after_half(self):
+        """has_sold_half=True, 스코어 >= threshold → SELL_ALL."""
+        engine = make_engine()
+        snap = make_snapshot(price=52500, bb_upper=52000, bb_lower=48000, atr=500, rsi=80, adx=35)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000, has_sold_half=True))
+        assert signal.signal == Signal.SELL_ALL
+
+    def test_trailing_stop_triggers(self):
+        """has_sold_half=True, trailing_high 설정, 가격 하락 → SELL_ALL."""
+        engine = make_engine(StrategyParams(trailing_stop_atr_multiplier=2.0))
+        snap = make_snapshot(price=53500, atr=500, rsi=50, adx=25)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(
+            entry_price=50000, has_sold_half=True, trailing_high=55000
+        ))
+        assert signal.signal == Signal.SELL_ALL
+        assert "트레일링 스탑" in signal.reason
+
+    def test_trailing_stop_inactive_before_half(self):
+        """has_sold_half=False → 트레일링 스탑 무시."""
+        engine = make_engine(StrategyParams(trailing_stop_atr_multiplier=2.0))
+        snap = make_snapshot(price=53500, atr=500, rsi=50, adx=25)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(
+            entry_price=50000, has_sold_half=False, trailing_high=55000
+        ))
+        assert signal.signal != Signal.SELL_ALL or "트레일링" not in signal.reason
+
+    def test_exit_all_weights_zero(self):
+        """모든 매도 가중치 0 → HOLD."""
+        params = StrategyParams(
+            w_exit_rsi_level=0, w_exit_bb_position=0,
+            w_exit_profit_pct=0, w_exit_adx_trend=0,
+        )
+        engine = make_engine(params)
+        snap = make_snapshot(price=55000, rsi=90, adx=50)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
+        assert signal.signal == Signal.HOLD
+        assert signal.score == 0.0
+
+    def test_exit_min_profit_guard(self):
+        """스코어 충분하지만 수익률 < min_profit_margin → HOLD."""
+        params = StrategyParams(
+            exit_score_threshold=30.0,
+            min_profit_margin=0.05,
+            w_exit_rsi_level=1.0, w_exit_bb_position=1.0,
+            w_exit_profit_pct=1.0, w_exit_adx_trend=1.0,
+        )
+        engine = make_engine(params)
+        snap = make_snapshot(price=50100, bb_upper=52000, bb_lower=48000, atr=500, rsi=75, adx=35)
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
+        assert signal.signal == Signal.HOLD
+        assert "수익률 부족" in signal.reason

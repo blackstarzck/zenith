@@ -22,6 +22,7 @@ class Position:
     volume: float
     amount: float         # 진입 총액 (KRW)
     has_sold_half: bool = False  # 1차 분할 익절 완료 여부
+    trailing_high: float = 0.0   # 1차 익절 후 추적 고점 (0이면 비활성)
     entry_fee: float = 0.0       # 매수 시 지불한 수수료 (KRW)
 
 
@@ -177,8 +178,23 @@ class RiskManager:
         """모든 포지션을 반환합니다."""
         return dict(self._positions)
 
-    def mark_half_sold(self, symbol: str) -> None:
-        """1차 분할 익절 완료를 표시합니다."""
+    def mark_half_sold(self, symbol: str, current_price: float = 0.0) -> None:
+        """1차 분할 매도 완료를 기록합니다."""
+        pos = self._positions.get(symbol)
+        if pos:
+            pos.has_sold_half = True
+            pos.trailing_high = current_price  # 트레일링 추적 시작
+
+    def update_trailing_high(self, symbol: str, current_price: float) -> None:
+        """보유 종목의 트레일링 고점을 업데이트합니다.
+
+        1차 익절(has_sold_half=True) 후에만 추적합니다.
+        """
+        pos = self._positions.get(symbol)
+        if pos is None or not pos.has_sold_half:
+            return
+        if current_price > pos.trailing_high:
+            pos.trailing_high = current_price
         if symbol in self._positions:
             self._positions[symbol].has_sold_half = True
 
