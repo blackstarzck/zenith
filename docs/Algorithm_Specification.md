@@ -30,7 +30,7 @@
 #### 최종 점수 계산 (Weighted Average)
 `total_score = Σ(w_i × score_i) / Σ(w_i)`
 
-* **진입 조건:** `total_score ≥ entry_score_threshold` (기본값: 85.0)
+* **진입 조건:** `total_score ≥ entry_score_threshold` (기본값: 70.0)
 * **특징:** 특정 지표가 기준에 약간 미달하더라도 다른 지표가 매우 강력한 신호를 보낸다면 진입이 가능해져, 유연한 대응이 가능합니다.
 
 ### 3단계: 포지션 사이징 (Kelly Criterion)

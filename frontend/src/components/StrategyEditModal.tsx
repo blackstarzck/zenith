@@ -16,7 +16,7 @@ import {
 import { EditOutlined, UndoOutlined, CheckOutlined } from '@ant-design/icons';
 import { DEFAULT_STRATEGY as SHARED_DEFAULT, PRESETS, getActivePresetName } from '../lib/strategyParams';
 
-const { Title } = Typography;
+const { Title, Text } = Typography;
 
 export interface StrategyParams {
   bb_period: number;
@@ -91,7 +91,7 @@ export default function StrategyEditModal({
           </Button>
         </Space>
       }
-      width={520}
+      width={600}
       destroyOnHidden
     >
       {contextHolder}
@@ -152,54 +152,92 @@ export default function StrategyEditModal({
         </Row>
 
         <Divider titlePlacement="left" plain>
-          스코어링 가중치
+          매수 진입 조건 (스코어링)
         </Divider>
         <Alert
-          description="각 지표의 중요도를 0.0 ~ 10.0 사이로 설정합니다. 총합이 진입 임계값을 넘으면 매수합니다."
+          description="각 조건이 맞을 때마다 점수를 부여합니다. 총점이 '진입 스코어 임계값'을 넘으면 봇이 매수를 실행합니다. 중요하게 생각하는 조건의 점수를 높여보세요."
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
         />
         <Row gutter={16}>
           <Col span={12}>
-            <Form.Item label="변동성 (Volatility)" name="w_volatility">
-              <Slider min={0} max={10} step={0.1} />
+            <Form.Item label="변동성 (Volatility)" name="w_volatility" style={{ marginBottom: 8 }}>
+              <Slider min={0} max={3} step={0.1} />
             </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              시장이 안정적일수록 높은 점수. 급등락이 심하면 매수를 자제합니다.
+            </Text>
           </Col>
           <Col span={12}>
-            <Form.Item label="이평선 추세 (MA Trend)" name="w_ma_trend">
-              <Slider min={0} max={10} step={0.1} />
+            <Form.Item label="이평선 추세 (MA Trend)" name="w_ma_trend" style={{ marginBottom: 8 }}>
+              <Slider min={0} max={3} step={0.1} />
             </Form.Item>
-          </Col>
-        </Row>
-        <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item label="ADX 추세 강도" name="w_adx">
-              <Slider min={0} max={10} step={0.1} />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
-            <Form.Item label="볼린저 밴드 회복" name="w_bb_recovery">
-              <Slider min={0} max={10} step={0.1} />
-            </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              20일선이 50일선 위에 있으면 상승 추세로 판단하여 높은 점수를 줍니다.
+            </Text>
           </Col>
         </Row>
         <Row gutter={16}>
           <Col span={12}>
-            <Form.Item label="RSI 기울기" name="w_rsi_slope">
-              <Slider min={0} max={10} step={0.1} />
+            <Form.Item label="ADX 추세 강도" name="w_adx" style={{ marginBottom: 8 }}>
+              <Slider min={0} max={3} step={0.1} />
             </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              ADX가 낮을수록(횡보장) 평균 회귀 전략에 유리하여 높은 점수를 줍니다.
+            </Text>
           </Col>
           <Col span={12}>
-            <Form.Item label="RSI 레벨" name="w_rsi_level">
-              <Slider min={0} max={10} step={0.1} />
+            <Form.Item label="볼린저 밴드 회복" name="w_bb_recovery" style={{ marginBottom: 8 }}>
+              <Slider min={0} max={3} step={0.1} />
             </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              가격이 하단밴드 아래로 떨어졌다가 다시 올라오면 반등 신호로 높은 점수를 줍니다.
+            </Text>
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item label="RSI 기울기" name="w_rsi_slope" style={{ marginBottom: 8 }}>
+              <Slider min={0} max={3} step={0.1} />
+            </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              RSI가 상승 전환하는 기울기가 클수록 반등 모멘텀이 강하여 높은 점수를 줍니다.
+            </Text>
+          </Col>
+          <Col span={12}>
+            <Form.Item label="RSI 레벨" name="w_rsi_level" style={{ marginBottom: 8 }}>
+              <Slider min={0} max={3} step={0.1} />
+            </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              RSI가 낮을수록(과매도) 반등 가능성이 높아 높은 점수를 줍니다.
+            </Text>
           </Col>
         </Row>
         <Row gutter={16}>
           <Col span={24}>
-            <Form.Item label="진입 스코어 임계값" name="entry_score_threshold">
-              <InputNumber min={0} max={100} step={1} style={{ width: '100%' }} />
+            <Form.Item label="진입 스코어 임계값" style={{ marginBottom: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, opacity: 0.65, marginBottom: 8 }}>
+                <span>공격적 (55)</span>
+                <span>보수적 (90)</span>
+              </div>
+              <Row gutter={16} align="middle">
+                <Col span={18}>
+                  <Form.Item name="entry_score_threshold" noStyle>
+                    <Slider
+                      min={0}
+                      max={100}
+                      step={1}
+                      marks={{ 55: '공격적', 70: '균형', 90: '보수적' }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={6}>
+                  <Form.Item name="entry_score_threshold" noStyle>
+                    <InputNumber min={0} max={100} step={1} style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+              </Row>
             </Form.Item>
           </Col>
         </Row>

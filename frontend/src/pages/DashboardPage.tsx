@@ -406,7 +406,7 @@ const buildBaseSymbolColumns = (strategyParams: StrategyParams | null): ColumnsT
       
       const weights = strategyParams ?? DEFAULT_STRATEGY;
       const { total, breakdown } = calcEntryScore(ind, weights);
-      const threshold = weights.entry_score_threshold ?? 85;
+      const threshold = weights.entry_score_threshold ?? 70;
       
       const color = total >= threshold ? '#389e0d' : total >= threshold - 15 ? '#fa8c16' : '#cf1322';
       

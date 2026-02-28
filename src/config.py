@@ -94,7 +94,7 @@ class StrategyParams:
     w_rsi_level: float = 1.0
 
     # 스코어링 진입 임계치 (0~100, 가중합산 스코어가 이 값 이상이면 BUY)
-    entry_score_threshold: float = 85.0
+    entry_score_threshold: float = 70.0
 
     def to_dict(self) -> dict:
         """StrategyParams를 딕셔너리로 변환합니다."""

@@ -15,7 +15,7 @@ export const DEFAULT_STRATEGY: StrategyParams = {
   w_bb_recovery: 1.0,
   w_rsi_slope: 1.0,
   w_rsi_level: 1.0,
-  entry_score_threshold: 85,
+  entry_score_threshold: 70,
 };
 
 export const PRESETS: { name: string; description: string; params: StrategyParams }[] = [
@@ -37,7 +37,7 @@ export const PRESETS: { name: string; description: string; params: StrategyParam
   {
     name: '변동성 장세',
     description: '급등락 대응',
-    params: { bb_period: 15, bb_std_dev: 2.5, rsi_period: 10, rsi_oversold: 25, atr_period: 10, atr_stop_multiplier: 3.5, top_volume_count: 5, w_volatility: 2.0, w_ma_trend: 1.0, w_adx: 1.0, w_bb_recovery: 1.5, w_rsi_slope: 1.5, w_rsi_level: 1.5, entry_score_threshold: 85 },
+    params: { bb_period: 15, bb_std_dev: 2.5, rsi_period: 10, rsi_oversold: 25, atr_period: 10, atr_stop_multiplier: 3.5, top_volume_count: 5, w_volatility: 2.0, w_ma_trend: 1.0, w_adx: 1.0, w_bb_recovery: 1.5, w_rsi_slope: 1.5, w_rsi_level: 1.5, entry_score_threshold: 75 },
   },
 ];
 
