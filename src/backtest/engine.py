@@ -202,7 +202,6 @@ class BacktestEngine:
 
                     balance += sell_amount - fee
                     position = None
-                    strategy.reset_tracking(symbol)
 
                     if verbose:
                         logger.info("[손절] %s @ %.2f | PnL: %+.0f (%.2f%%)",
@@ -224,7 +223,6 @@ class BacktestEngine:
 
                     balance += sell_amount - fee
                     position = None
-                    strategy.reset_tracking(symbol)
 
                     if verbose:
                         logger.info("[전량매도] %s @ %.2f | PnL: %+.0f (%.2f%%)",

@@ -39,6 +39,7 @@ export interface SymbolIndicators {
   bb: 'none' | 'below' | 'recovered'; // BB 하단 이탈 상태
   rsi: number;           // RSI 값 (0~100)
   rsi_slope: number;     // RSI 기울기 (양수=상승전환)
+  adx: number;           // ADX 값 (0~100, 낮을수록 횡보=평균회귀 유리)
 }
 
 export interface BotState {

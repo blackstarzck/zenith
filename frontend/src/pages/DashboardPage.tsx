@@ -30,7 +30,7 @@ import HeldCoinChart from '../components/HeldCoinChart';
 import AssetGrowthChart from '../components/AssetGrowthChart';
 import StrategyEditModal from '../components/StrategyEditModal';
 import type { StrategyParams } from '../components/StrategyEditModal';
-import { loadStrategyParams, saveStrategyParams, getActivePresetName } from '../lib/strategyParams';
+import { loadStrategyParams, saveStrategyParams, getActivePresetName, DEFAULT_STRATEGY } from '../lib/strategyParams';
 
 const { Title, Text } = Typography;
 /* ── 색상 상수 (한국 주식시장 컨벤션) ───────────────────── */
@@ -67,9 +67,47 @@ function parseInd(v: unknown): SymbolIndicators | undefined {
   if (v == null) return undefined;
   if (typeof v === 'object' && 'vol' in (v as object)) return v as SymbolIndicators;
   // 이전 형식: number (변동성만 저장)
-  if (typeof v === 'number') return { vol: v, trend: 'unknown', bb: 'none', rsi: 50, rsi_slope: 0 };
+  if (typeof v === 'number') return { vol: v, trend: 'unknown', bb: 'none', rsi: 50, rsi_slope: 0, adx: 25 };
   return undefined;
 }
+function calcEntryScore(ind: SymbolIndicators | undefined, weights: StrategyParams | null): { total: number; breakdown: Record<string, { weight: number; score: number }> } {
+  if (!ind || !weights) return { total: 0, breakdown: {} };
+
+  const vol = ind.vol ?? 0;
+  const trend = ind.trend ?? 'unknown';
+  const adx = ind.adx ?? 25;
+  const bb = ind.bb ?? 'none';
+  const rsi_slope = ind.rsi_slope ?? 0;
+  const rsi = ind.rsi ?? 50;
+
+  const s_vol = Math.max(0, Math.min(100, ((3.0 - vol) / 2.0) * 100));
+  const s_ma = trend === 'up' ? 100 : trend === 'down' ? 0 : 50;
+  const s_adx = Math.max(0, Math.min(100, ((40 - adx) / 25) * 100));
+  const s_bb = bb === 'recovered' ? 100 : bb === 'below' ? 30 : 0;
+  const s_rsi_slope = Math.max(0, Math.min(100, (rsi_slope / 3.0) * 100));
+  const s_rsi = Math.max(0, Math.min(100, ((45 - rsi) / 25) * 100));
+
+  const breakdown: Record<string, { weight: number; score: number }> = {
+    '변동성': { weight: weights.w_volatility ?? 1.0, score: s_vol },
+    '추세': { weight: weights.w_ma_trend ?? 1.0, score: s_ma },
+    'ADX': { weight: weights.w_adx ?? 1.0, score: s_adx },
+    'BB': { weight: weights.w_bb_recovery ?? 1.0, score: s_bb },
+    'RSI↗': { weight: weights.w_rsi_slope ?? 1.0, score: s_rsi_slope },
+    'RSI': { weight: weights.w_rsi_level ?? 1.0, score: s_rsi },
+  };
+
+  let totalWeight = 0;
+  let totalScore = 0;
+  for (const key in breakdown) {
+    totalWeight += breakdown[key].weight;
+    totalScore += breakdown[key].weight * breakdown[key].score;
+  }
+
+  const total = totalWeight > 0 ? totalScore / totalWeight : 0;
+
+  return { total, breakdown };
+}
+
 
 /* ── 종목 테이블 행 타입 ────────────────────────────────── */
 
@@ -165,7 +203,7 @@ const tradeColumns: ColumnsType<Trade> = [
 
 /* ── 거래대금 상위 종목 테이블 컬럼 (모듈 레벨 — 안정 참조) ── */
 
-const baseSymbolColumns: ColumnsType<SymbolRow> = [
+const buildBaseSymbolColumns = (strategyParams: StrategyParams | null): ColumnsType<SymbolRow> => [
   {
     title: '#',
     dataIndex: 'rank',
@@ -332,6 +370,66 @@ const baseSymbolColumns: ColumnsType<SymbolRow> = [
         <Text style={{ fontSize: 12, color, fontWeight: 500 }}>
           {rsi.toFixed(0)} {arrow}
         </Text>
+      );
+    },
+  },
+  {
+    title: (
+      <Space size={4}>
+        <span>스코어</span>
+        <Tooltip destroyOnHidden
+          title={
+            <div>
+              <div>진입 스코어 (가중치 합산)</div>
+              <div style={{ marginTop: 6 }}>
+                <span style={{ color: '#389e0d' }}>■</span> 임계치 이상 — 진입 가능
+              </div>
+              <div>
+                <span style={{ color: '#fa8c16' }}>■</span> 임계치 -15 이상 — 주의
+              </div>
+              <div>
+                <span style={{ color: '#cf1322' }}>■</span> 미달 — 진입 불가
+              </div>
+            </div>
+          }
+        >
+          <InfoCircleOutlined style={{ fontSize: 11, color: '#999', cursor: 'pointer' }} />
+        </Tooltip>
+      </Space>
+    ),
+    dataIndex: 'indicators',
+    width: 75,
+    align: 'center' as const,
+    render: (_: unknown, record: SymbolRow) => {
+      const ind = record.indicators;
+      if (!ind) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+      
+      const weights = strategyParams ?? DEFAULT_STRATEGY;
+      const { total, breakdown } = calcEntryScore(ind, weights);
+      const threshold = weights.entry_score_threshold ?? 85;
+      
+      const color = total >= threshold ? '#389e0d' : total >= threshold - 15 ? '#fa8c16' : '#cf1322';
+      
+      return (
+        <Tooltip destroyOnHidden
+          title={
+            <div style={{ minWidth: 120 }}>
+              {Object.entries(breakdown).map(([name, { weight, score }]) => (
+                <div key={name} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                  <span>{name}:</span>
+                  <span>{Math.round(score)} (×{weight.toFixed(1)})</span>
+                </div>
+              ))}
+              <div style={{ borderTop: '1px solid #444', marginTop: 6, paddingTop: 6, textAlign: 'right' }}>
+                임계치: {threshold.toFixed(1)}
+              </div>
+            </div>
+          }
+        >
+          <Text style={{ fontSize: 12, color, fontWeight: 600, cursor: 'help' }}>
+            {Math.round(total)}
+          </Text>
+        </Tooltip>
       );
     },
   },
@@ -523,12 +621,13 @@ interface SymbolTableProps {
   rows: SymbolRow[];
   tickers: Map<string, TickerData>;
   updatedAt: string | null;
+  strategyParams: StrategyParams | null;
 }
 
-const SymbolTable = memo(function SymbolTable({ rows, tickers, updatedAt }: SymbolTableProps) {
+const SymbolTable = memo(function SymbolTable({ rows, tickers, updatedAt, strategyParams }: SymbolTableProps) {
   const columns = useMemo<ColumnsType<SymbolRow>>(
-    () => [...baseSymbolColumns, ...buildTickerColumns(tickers)],
-    [tickers]
+    () => [...buildBaseSymbolColumns(strategyParams), ...buildTickerColumns(tickers)],
+    [tickers, strategyParams]
   );
   return (
     <Card
@@ -773,7 +872,7 @@ export default function DashboardPage() {
       </Row>
 
       {/* ── 거래대금 상위 종목 ── */}
-      <SymbolTable rows={allRows} tickers={deferredTickers} updatedAt={botState?.updated_at ?? null} />
+      <SymbolTable rows={allRows} tickers={deferredTickers} updatedAt={botState?.updated_at ?? null} strategyParams={(botState?.strategy_params as unknown as StrategyParams) ?? null} />
 
       {/* ── 보유 종목 가격 & 손절선 (그리드) ── */}
       {heldLoading ? (

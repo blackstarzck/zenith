@@ -351,6 +351,7 @@ class Orchestrator:
                     "bb": bb_str,
                     "rsi": rsi_val,
                     "rsi_slope": rsi_slope,
+                    "adx": round(snapshot.adx, 1),
                 }
 
                 # 체결 실패 쿨다운 확인
