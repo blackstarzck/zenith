@@ -27,7 +27,7 @@ export interface TickerData {
 const WS_URL = 'wss://api.upbit.com/websocket/v1';
 const RECONNECT_DELAY = 3_000;
 /** 배치 플러시 간격 (ms). 이 주기마다 버퍼를 state에 반영합니다. */
-const FLUSH_INTERVAL = 500;
+const FLUSH_INTERVAL = 1000;
 
 /**
  * 업비트 WebSocket 실시간 시세를 구독합니다.
@@ -61,6 +61,24 @@ export function useUpbitTicker(symbols: string[]) {
       clearInterval(flushTimer.current);
     };
   }, []);
+
+  // symbols 변경 시 더 이상 구독하지 않는 종목의 시세를 제거 (Map 무한 성장 방지)
+  useEffect(() => {
+    const activeSet = new Set(symbols);
+    setTickers((prev) => {
+      let needsPrune = false;
+      for (const key of prev.keys()) {
+        if (!activeSet.has(key)) { needsPrune = true; break; }
+      }
+      if (!needsPrune) return prev;
+      const next = new Map<string, TickerData>();
+      for (const [k, v] of prev) {
+        if (activeSet.has(k)) next.set(k, v);
+      }
+      return next;
+    });
+    bufferRef.current = new Map();
+  }, [symbolsKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const connect = useCallback(() => {
     if (symbols.length === 0) return;

@@ -30,4 +30,19 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    port: 5173,
+    proxy: {
+      '/kakao-token': {
+        target: 'https://kauth.kakao.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/kakao-token/, '/oauth/token'),
+      },
+      '/kakao-api': {
+        target: 'https://kapi.kakao.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/kakao-api/, ''),
+      },
+    },
+  },
 })
