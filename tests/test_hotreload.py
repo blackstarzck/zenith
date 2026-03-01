@@ -49,7 +49,7 @@ class TestStrategyParamsSerialization:
         assert d["rsi_period"] == 14
         assert d["rsi_oversold"] == 30.0
         assert d["atr_period"] == 14
-        assert d["atr_stop_multiplier"] == 2.5
+        assert d["atr_stop_multiplier"] == 3.0
 
     def test_from_dict_with_full_data(self):
         """from_dict는 전체 데이터에서 StrategyParams를 생성합니다."""
@@ -105,13 +105,13 @@ class TestStrategyParamsSerialization:
     def test_to_dict_includes_scoring_fields(self):
         """to_dict는 스코어링 필드를 포함합니다."""
         d = StrategyParams().to_dict()
-        assert d["w_volatility"] == 1.0
-        assert d["w_ma_trend"] == 1.0
-        assert d["w_adx"] == 1.0
-        assert d["w_bb_recovery"] == 1.0
-        assert d["w_rsi_slope"] == 1.0
-        assert d["w_rsi_level"] == 1.0
-        assert d["entry_score_threshold"] == 70.0
+        assert d["w_volatility"] == 0.8
+        assert d["w_ma_trend"] == 1.2
+        assert d["w_adx"] == 1.1
+        assert d["w_bb_recovery"] == 0.9
+        assert d["w_rsi_slope"] == 1.2
+        assert d["w_rsi_level"] == 1.3
+        assert d["entry_score_threshold"] == 78.0
 
     def test_from_dict_with_scoring_weights(self):
         """from_dict는 스코어링 가중치를 복원합니다."""
@@ -119,7 +119,7 @@ class TestStrategyParamsSerialization:
         params = StrategyParams.from_dict(data)
         assert params.w_volatility == 2.0
         assert params.entry_score_threshold == 60.0
-        assert params.w_ma_trend == 1.0  # default preserved
+        assert params.w_ma_trend == 1.2  # default preserved (now 1.2)
 
 
 # ── MeanReversionEngine.update_params ─────────────────────────
@@ -144,14 +144,14 @@ class TestEngineUpdateParams:
         """update_params 후 청산 평가에 새 파라미터가 적용됩니다."""
         engine = MeanReversionEngine(StrategyParams())
 
-        # 기본 atr_stop_multiplier=2.5 → 손절선 = 50000 - 500*2.5 = 48750
+        # 기본 atr_stop_multiplier_ranging=2.8 → 손절선 = 50000 - 500*2.8 = 48600
         snap = make_snapshot(price=48800, atr=500)
         pos = Position(symbol="KRW-BTC", entry_price=50000, volume=1.0, amount=50000)
         signal = engine.evaluate_exit("KRW-BTC", snap, pos)
-        assert signal.signal == Signal.HOLD  # 48800 > 48750
+        assert signal.signal == Signal.HOLD  # 48800 > 48600
 
-        # atr_stop_multiplier를 2.0으로 줄이면 손절선 = 50000 - 500*2.0 = 49000
-        engine.update_params(StrategyParams(atr_stop_multiplier=2.0))
+        # atr_stop_multiplier_ranging를 2.0으로 줄이면 손절선 = 50000 - 500*2.0 = 49000
+        engine.update_params(StrategyParams(atr_stop_multiplier_ranging=2.0))
         signal2 = engine.evaluate_exit("KRW-BTC", snap, pos)
         assert signal2.signal == Signal.STOP_LOSS  # 48800 < 49000
 
