@@ -64,7 +64,10 @@ class StrategyParams:
 
     # ATR 기반 동적 손절
     atr_period: int = 14
-    atr_stop_multiplier: float = 2.5
+    atr_stop_multiplier: float = 3.0
+    atr_stop_multiplier_ranging: float = 2.8   # 횡보장: 노이즈 허용 여유
+    atr_stop_multiplier_trending: float = 2.2  # 추세장: 역추세 빠른 탈출
+    atr_stop_multiplier_volatile: float = 2.5  # 변동성 폭발: 중립
 
     # 변동성 과부하 필터: 24h 변동성이 20일 평균의 N배 초과 시 매매 중단
     volatility_overload_ratio: float = 2.0
@@ -97,21 +100,22 @@ class StrategyParams:
     # 시장 레짐 감지기
     regime_adx_trending_threshold: float = 25.0  # ADX ≥ 이 값이면 추세장
     regime_vol_overload_ratio: float = 2.0       # 변동성 비율 ≥ 이 값이면 변동성 폭발
-    regime_lookback_candles: int = 3             # 히스테리시스 룩백 (다수결 캔들 수)
+    regime_lookback_candles: int = 2             # 히스테리시스 룩백 (다수결 캔들 수)
     # 하이브리드 레짐 오프셋 (레짐 상태별 진입 임계치 가산값)
-    regime_trending_offset: float = 15.0   # 추세장 시 entry_score_threshold에 가산
+    regime_trending_offset: float = 20.0   # 추세장 시 entry_score_threshold에 가산
     regime_volatile_offset: float = 25.0   # 변동성 폭발 시 entry_score_threshold에 가산
+    regime_min_hold_minutes: int = 20  # 레짐 변경 후 최소 유지 시간 (분) — 플래핑 방지
 
     # 스코어링 가중치 (0.0 = 비활성, 높을수록 비중 큼)
-    w_volatility: float = 1.0
-    w_ma_trend: float = 1.0
-    w_adx: float = 1.0
-    w_bb_recovery: float = 1.0
-    w_rsi_slope: float = 1.0
-    w_rsi_level: float = 1.0
+    w_volatility: float = 0.8       # 상시 만점 경향 → 비중 하향
+    w_ma_trend: float = 1.2         # 추세 컨텍스트 강화
+    w_adx: float = 1.1              # 추세 강도 반영 강화
+    w_bb_recovery: float = 0.9      # 상시 만점 경향 → 비중 하향
+    w_rsi_slope: float = 1.2        # 과매도 품질 반영 강화
+    w_rsi_level: float = 1.3        # 과매도 수준 가장 중요
 
     # 스코어링 진입 임계치 (0~100, 가중합산 스코어가 이 값 이상이면 BUY)
-    entry_score_threshold: float = 70.0
+    entry_score_threshold: float = 78.0
     # 매도 청산 스코어링 가중치 (0.0 = 비활성, 높을수록 비중 큼)
     w_exit_rsi_level: float = 1.0       # RSI 과매수 → 높은 청산 점수
     w_exit_bb_position: float = 1.0     # BB 상단 접근 → 높은 청산 점수
@@ -126,6 +130,16 @@ class StrategyParams:
 
     # 분할 매도 비율 (SELL_HALF 시 매도 비율)
     take_profit_sell_ratio: float = 0.5
+
+    def get_atr_multiplier(self, regime: str = "ranging") -> float:
+        """레짐에 따른 ATR 손절 배수를 반환합니다."""
+        if regime == "ranging":
+            return self.atr_stop_multiplier_ranging
+        elif regime == "trending":
+            return self.atr_stop_multiplier_trending
+        elif regime == "volatile":
+            return self.atr_stop_multiplier_volatile
+        return self.atr_stop_multiplier  # 알 수 없는 레짐 → 기본 폴백
 
     def to_dict(self) -> dict:
         """StrategyParams를 딕셔너리로 변환합니다."""

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from src.config import AppConfig, StrategyParams
 from src.collector.data_collector import UpbitCollector
@@ -61,6 +61,11 @@ class Orchestrator:
         self._consecutive_errors: int = 0     # 연속 에러 횟수 (지수 백오프용)
         self._max_backoff_sec: int = 300          # 최대 백오프 5분
         self._current_regime: str = "ranging"  # 현재 시장 레짐
+
+        # 연속 손절 브레이커: 30분 내 2건 이상 손절 시 신규 매수 30분 차단
+        self._stop_loss_timestamps: list[datetime] = []  # 손절 발동 시각 기록
+        self._entry_blocked_until: datetime | None = None  # 진입 차단 해제 시각
+        self._regime_changed_at: datetime | None = None  # 레짐 변경 시각 (플래핑 방지)
 
         # 감성 분석 모듈 (API 키가 설정된 경우에만 활성화)
         self._sentiment_enabled = bool(config.sentiment.groq_api_key and config.sentiment.cryptopanic_api_key)
@@ -190,8 +195,8 @@ class Orchestrator:
                 logger.warning("감시 대상 종목 없음")
                 return
 
-        # 1.5. 시장 레짐 감지 (10분마다, 종목 목록 갱신과 동일 주기)
-        if self._loop_count % 60 == 1:
+        # 1.5. 시장 레짐 감지 (2분마다 — 레짐 전환 감지 속도 개선)
+        if self._loop_count % 12 == 1:
             self._update_market_regime()
         # 1.6. 켈리 비중 업데이트 (10분마다, 레짐과 오프셋)
         if self._loop_count % 60 == 2:
@@ -274,10 +279,12 @@ class Orchestrator:
                 self._risk.update_trailing_high(symbol, snapshot.current_price)
 
                 # Position 객체 직접 전달
-                signal = self._strategy.evaluate_exit(symbol, snapshot, pos)
+                signal = self._strategy.evaluate_exit(symbol, snapshot, pos, regime=self._current_regime)
 
                 if signal.signal == Signal.STOP_LOSS:
                     self._execute_sell_all(symbol, pos, signal.reason, label="손절 매도")
+                    # 연속 손절 브레이커: 손절 시각 기록
+                    self._record_stop_loss()
                 elif signal.signal == Signal.SELL_ALL:
                     self._execute_sell_all(symbol, pos, signal.reason, label="2차 익절")
                 elif signal.signal == Signal.SELL_HALF:
@@ -295,6 +302,15 @@ class Orchestrator:
 
     def _evaluate_entries(self) -> None:
         """미보유 종목의 진입 조건을 평가합니다."""
+        # 연속 손절 브레이커: 차단 시간 내이면 신규 매수 거부
+        if self._entry_blocked_until and datetime.now() < self._entry_blocked_until:
+            if self._loop_count % 60 == 1:  # 10분에 1번만 로그
+                remaining = (self._entry_blocked_until - datetime.now()).seconds
+                logger.info("[연속 손절 브레이커] 신규 매수 차단 중 — 해제까지 %d초", remaining)
+            return
+        elif self._entry_blocked_until and datetime.now() >= self._entry_blocked_until:
+            logger.info("[연속 손절 브레이커] 차단 해제 — 신규 매수 재개")
+            self._entry_blocked_until = None
         # 레짐 기반 threshold offset 계산 (하이브리드 필터)
         regime_offset = 0.0
         if self._current_regime == "trending":
@@ -389,6 +405,7 @@ class Orchestrator:
                 signal = self._strategy.evaluate_entry(
                     symbol, snapshot, closes,
                     threshold_offset=regime_offset,
+                    regime=self._current_regime,
                 )
 
                 if signal.signal == Signal.BUY:
@@ -439,7 +456,7 @@ class Orchestrator:
                 )
 
                 price = snapshot.current_price
-                stop_loss = pos.entry_price - (snapshot.atr * params.atr_stop_multiplier)
+                stop_loss = pos.entry_price - (snapshot.atr * params.get_atr_multiplier(self._current_regime))
                 take_profit = snapshot.bb.upper
 
                 self._storage.insert_price_snapshot(
@@ -647,12 +664,30 @@ class Orchestrator:
 
             new_regime = result.regime.value
             if new_regime != self._current_regime:
-                logger.info(
-                    "[레짐 변경] %s → %s | ADX=%.1f, Vol=%.2f | 사유: %s",
-                    self._current_regime, new_regime,
-                    result.adx, result.volatility_ratio, result.reason,
+                # 단방향 홀드: 안전 모드(trending/volatile) 진입은 즉시 허용,
+                # 안전 모드 해제(→ ranging)는 최소 유지 시간 적용
+                allow_change = True
+                is_leaving_safety = (
+                    self._current_regime in ("trending", "volatile")
+                    and new_regime == "ranging"
                 )
-                self._current_regime = new_regime
+                if is_leaving_safety and self._regime_changed_at:
+                    min_hold = self._config.strategy.regime_min_hold_minutes
+                    elapsed = (datetime.now() - self._regime_changed_at).total_seconds() / 60
+                    if elapsed < min_hold:
+                        allow_change = False
+                        logger.debug(
+                            "[레짐 홀드] %s → %s 전환 차단 (최소 %d분 유지, 경과: %.0f분)",
+                            self._current_regime, new_regime, min_hold, elapsed,
+                        )
+                if allow_change:
+                    logger.info(
+                        "[레짐 변경] %s → %s | ADX=%.1f, Vol=%.2f | 사유: %s",
+                        self._current_regime, new_regime,
+                        result.adx, result.volatility_ratio, result.reason,
+                    )
+                    self._current_regime = new_regime
+                    self._regime_changed_at = datetime.now()
 
             self._storage.upsert_bot_state(market_regime=self._current_regime)
 
@@ -716,6 +751,35 @@ class Orchestrator:
                 logger.info("전략 파라미터 핫리로드 완료: %s", saved)
         except Exception:
             logger.warning("전략 파라미터 핫리로드 실패 — 기존 값 유지")
+    # ── 연속 손절 브레이커 ──────────────────────────────────────
+
+    def _record_stop_loss(self) -> None:
+        """손절 발동 시각을 기록하고, 30분 내 2건 이상이면 신규 매수를 30분 차단합니다.
+
+        연쇄 손절 방지 및 시장 안정화 대기를 위한 안전장치입니다.
+        """
+        now = datetime.now()
+        self._stop_loss_timestamps.append(now)
+
+        # 30분 이전 기록 제거
+        cutoff = now - timedelta(minutes=30)
+        self._stop_loss_timestamps = [
+            ts for ts in self._stop_loss_timestamps if ts >= cutoff
+        ]
+
+        # 30분 내 2건 이상 손절 → 신규 매수 30분 차단
+        if len(self._stop_loss_timestamps) >= 2:
+            self._entry_blocked_until = now + timedelta(minutes=30)
+            logger.warning(
+                "[연속 손절 브레이커 발동] 30분 내 %d건 손절 → 신규 매수 %s까지 차단",
+                len(self._stop_loss_timestamps),
+                self._entry_blocked_until.strftime('%H:%M:%S'),
+            )
+            self._safe_notify(
+                'notify_error',
+                f'[연속 손절 브레이커] 30분 내 {len(self._stop_loss_timestamps)}건 손절 — 신규 매수 30분 차단',
+            )
+
     # ── 유틸리티 ─────────────────────────────────────────────
 
     def _sync_existing_positions(self) -> None:

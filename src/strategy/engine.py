@@ -64,6 +64,7 @@ class MeanReversionEngine:
         snapshot: IndicatorSnapshot,
         closes_series: "pd.Series | None" = None,
         threshold_offset: float = 0.0,
+        regime: str = "ranging",
     ) -> TradeSignal:
         """매수 진입 조건을 스코어링 방식으로 평가합니다.
 
@@ -87,10 +88,17 @@ class MeanReversionEngine:
             "Vol": (params.w_volatility, self._score_volatility(snapshot.volatility_ratio)),
             "MA": (params.w_ma_trend, self._score_ma_trend(closes_series, params)),
             "ADX": (params.w_adx, self._score_adx(snapshot.adx)),
-            "BB": (params.w_bb_recovery, self._score_bb_recovery(closes_series, params)),
+            "BB": (params.w_bb_recovery, self._score_bb_recovery(closes_series, params, rsi=snapshot.rsi, adx=snapshot.adx, current_price=price)),
             "RSI↗": (params.w_rsi_slope, self._score_rsi_slope(closes_series, params)),
             "RSI": (params.w_rsi_level, self._score_rsi_level(snapshot.rsi)),
         }
+
+        # Falling Knife Guard: RSI < 15 시 RSI↗ 기울기 스코어 감쇠 (×0.6)
+        # 극저 RSI에서의 일시적 반등 기울기는 신뢰도가 낮음
+        if snapshot.rsi < 15.0:
+            w, s = scores["RSI↗"]
+            scores["RSI↗"] = (w, s * 0.6)
+
 
         # ── 정규화 가중합산 ──
         total_weight = sum(w for w, _ in scores.values())
@@ -114,7 +122,7 @@ class MeanReversionEngine:
         effective_threshold = min(params.entry_score_threshold + threshold_offset, 99.0)
 
         if total_score >= effective_threshold:
-            stop_loss = price - (snapshot.atr * params.atr_stop_multiplier)
+            stop_loss = price - (snapshot.atr * params.get_atr_multiplier(regime))
             return TradeSignal(
                 signal=Signal.BUY,
                 symbol=symbol,
@@ -155,12 +163,30 @@ class MeanReversionEngine:
         # adx ≤ 15 → 100, adx ≥ 40 → 0, 선형 보간
         return max(0.0, min(100.0, (40.0 - adx) / 25.0 * 100.0))
 
-    def _score_bb_recovery(self, closes_series, params: StrategyParams) -> float:
-        """BB 복귀 스코어. 무상태, calc_bb_status() 사용."""
+    def _score_bb_recovery(self, closes_series, params: StrategyParams, rsi: float = 50.0, adx: float = 20.0, current_price: float = 0.0) -> float:
+        """BB 복귀 스코어. 3단계 추세 컨텍스트 평가.
+
+        - RSI < 15 (극단적 과매도) → 30점 (떨어지는 칼날 방어)
+        - MA20 < MA50 (하락 추세) → 30점 (데드캣 바운스 방어)
+        - ADX > 25 & 가격 < MA50 (추세 의심) → 40점
+        - 그 외 → 100점 (정상 평균회귀)
+        """
         if closes_series is None or len(closes_series) < params.bb_period + 20:
             return 0.0  # 데이터 부족 시 불리
         status = calc_bb_status(closes_series, params.bb_period, params.bb_std_dev)
         if status == "recovered":
+            # 1단계: Falling Knife Guard — 극단적 과매도에서 반등 신호 신뢰도 하향
+            if rsi < 15.0:
+                return 30.0
+            # 2단계: MA 데드크로스 — 확정적 하락 추세
+            ma_trend = calc_ma_trend(closes_series, params.ma_short_period, params.ma_long_period)
+            if ma_trend is False:
+                return 30.0
+            # 3단계: 추세 의심 구간 — ADX > 25이면서 가격이 MA50 아래
+            if adx > 25.0 and current_price > 0:
+                ma50 = closes_series.rolling(window=params.ma_long_period).mean().iloc[-1]
+                if current_price < ma50:
+                    return 40.0
             return 100.0
         elif status == "below":
             return 30.0  # 이탈 중 — 부분 점수 (반등 가능성)
@@ -185,6 +211,7 @@ class MeanReversionEngine:
         symbol: str,
         snapshot: IndicatorSnapshot,
         position: "Position",
+        regime: str = "ranging",
     ) -> TradeSignal:
         """청산 조건을 스코어링 방식으로 평가합니다.
 
@@ -208,7 +235,7 @@ class MeanReversionEngine:
         has_sold_half = position.has_sold_half
 
         # ── [하드 룰 1] 동적 손절 (ATR 기반) ──
-        stop_loss_price = entry_price - (snapshot.atr * params.atr_stop_multiplier)
+        stop_loss_price = entry_price - (snapshot.atr * params.get_atr_multiplier(regime))
         if price <= stop_loss_price:
             return TradeSignal(
                 signal=Signal.STOP_LOSS,
@@ -229,6 +256,18 @@ class MeanReversionEngine:
                     price=price,
                     stop_loss_price=trailing_stop,
                 )
+
+        # ── [1차 익절 후] 스코어링 매도 비활성화 — 트레일링 스탑만 작동 ──
+        # SIGN 분석(2026-03-01)에서 도출: 스코어링이 트레일링보다 항상 먼저 발동하여
+        # 트레일링 스탑이 사문화됨. 1차 익절 후에는 하드 룰만으로 2차 매도 결정.
+        if has_sold_half:
+            return TradeSignal(
+                signal=Signal.HOLD,
+                symbol=symbol,
+                reason=f"1차 익절 완료 — 트레일링 스탑 대기 중 (스코어링 매도 비활성)",
+                price=price,
+                stop_loss_price=stop_loss_price,
+            )
 
         # ── [스코어링] 익절 조건 평가 ──
         scores = {
