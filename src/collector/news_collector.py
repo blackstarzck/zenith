@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class NewsCollector:
-    """CryptoPanic API v1 뉴스 수집기."""
+    """CryptoPanic Developer API v2 뉴스 수집기."""
 
     def __init__(self, config: SentimentConfig) -> None:
         """
@@ -26,7 +26,7 @@ class NewsCollector:
         self._currencies = config.target_currencies
         self._max_news = config.max_news_per_poll
         self._timeout = config.api_timeout_sec
-        self._endpoint = "https://cryptopanic.com/api/v1/posts/"
+        self._endpoint = "https://cryptopanic.com/api/developer/v2/posts/"
 
     def fetch_latest_news(self, seen_ids: set[str]) -> list[dict[str, Any]]:
         """
@@ -45,8 +45,8 @@ class NewsCollector:
         params = {
             "auth_token": self._api_key,
             "currencies": self._currencies,
-            "kind": "news",
-            "regions": "ko,en",
+            "public": "true",
+            "regions": "ko",
         }
 
         try:
