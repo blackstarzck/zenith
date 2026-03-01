@@ -478,3 +478,4 @@ class StorageClient:
             self._client.table("sentiment_insights").delete().lt("created_at", cutoff).execute()
             logger.info("sentiment_insights %d일 이전 데이터 정리 완료", days)
         except Exception:
+            logger.exception("오래된 감성 분석 데이터 정리 실패")

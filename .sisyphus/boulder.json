@@ -1,9 +1,10 @@
 {
-  "active_plan": "C:\\Users\\찬기\\Desktop\\workspace\\projects\\zenith\\.sisyphus\\plans\\docs-sync-strategy-refactor.md",
-  "started_at": "2026-03-01T15:19:14.661Z",
+  "active_plan": "C:\\Users\\찬기\\Desktop\\workspace\\projects\\zenith\\.sisyphus\\plans\\fix-sentiment-insights-401.md",
+  "started_at": "2026-03-01T16:07:30.161Z",
   "session_ids": [
     "ses_356892a66ffey66BiVYLrk5zcB"
   ],
-  "plan_name": "docs-sync-strategy-refactor",
-  "agent": "atlas"
+  "plan_name": "fix-sentiment-insights-401",
+  "agent": "atlas",
+  "worktree_path": "C:\\Users\\찬기\\Desktop\\workspace\\projects\\zenith"
 }

@@ -1,0 +1,90 @@
+{
+    "info": {
+        "_postman_id": "e1ec0304-4d0c-4e6e-82f2-2cf745843aa0",
+        "name": "CryptoPanic API v2 Full",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+        "_exporter_id": "13266974"
+    },
+    "item": [
+        {
+            "name": "Get Posts (v2 All Parameters)",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "https://cryptopanic.com/api/developer/v2/posts/?auth_token=15d6155fbb8023aa90f820558de569a40338faa3&currencies=BTC,ETH&public=true&regions=ko",
+                    "protocol": "https",
+                    "host": [
+                        "cryptopanic",
+                        "com"
+                    ],
+                    "path": [
+                        "api",
+                        "developer",
+                        "v2",
+                        "posts",
+                        ""
+                    ],
+                    "query": [
+                        {
+                            "key": "auth_token",
+                            "value": "15d6155fbb8023aa90f820558de569a40338faa3",
+                            "description": "인증을 위한 API 키"
+                        },
+                        {
+                            "key": "filter",
+                            "value": "all",
+                            "description": "데이터 필터 옵션 (all, hot, rising, bullish, bearish, important, saved, my)",
+                            "disabled": true
+                        },
+                        {
+                            "key": "currencies",
+                            "value": "BTC,ETH",
+                            "description": "특정 통화 기호 (쉼표로 구분)"
+                        },
+                        {
+                            "key": "kind",
+                            "value": "news",
+                            "description": "콘텐츠 유형 (news, media)",
+                            "disabled": true
+                        },
+                        {
+                            "key": "public",
+                            "value": "true",
+                            "description": "공용 API 활성화 여부"
+                        },
+                        {
+                            "key": "page",
+                            "value": "1",
+                            "description": "조회할 페이지 번호",
+                            "disabled": true
+                        },
+                        {
+                            "key": "following",
+                            "value": "true",
+                            "description": "팔로우 중인 소스 필터",
+                            "disabled": true
+                        },
+                        {
+                            "key": "metadata",
+                            "value": "true",
+                            "description": "추가 메타데이터 포함 여부",
+                            "disabled": true
+                        },
+                        {
+                            "key": "approved",
+                            "value": "true",
+                            "description": "승인된 게시물만 표시",
+                            "disabled": true
+                        },
+                        {
+                            "key": "regions",
+                            "value": "ko"
+                        }
+                    ]
+                }
+            },
+            "response": []
+        }
+    ]
+}
