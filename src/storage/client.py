@@ -427,3 +427,54 @@ class StorageClient:
         except Exception:
             logger.exception("일일 리포트 조회 실패: %s", report_date)
             return None
+
+    # ── sentiment_insights ────────────────────────────────────
+
+    def insert_sentiment_insight(self, data: dict[str, Any]) -> dict[str, Any]:
+        """뉴스 감성 분석 결과를 저장합니다."""
+        try:
+            row = {
+                "news_id": data["news_id"],
+                "title": data["title"],
+                "source": data.get("source"),
+                "url": data.get("url"),
+                "currencies": data.get("currencies", []),
+                "sentiment_score": data.get("sentiment_score", 0.0),
+                "sentiment_label": data.get("sentiment_label", "neutral"),
+                "decision": data.get("decision", "WAIT"),
+                "confidence": data.get("confidence", 0.0),
+                "reasoning_chain": data.get("reasoning_chain"),
+                "keywords": data.get("keywords", []),
+                "positive_factors": data.get("positive_factors", []),
+                "negative_factors": data.get("negative_factors", []),
+                "volume_impact": data.get("volume_impact", False),
+            }
+            result = self._client.table("sentiment_insights").insert(row).execute()
+            logger.info("감성 분석 저장: %s", data.get("title", "")[:50])
+            return result.data[0] if result.data else {}
+        except Exception:
+            logger.exception("감성 분석 결과 저장 실패: %s", data.get("news_id", "?"))
+            return {}
+
+    def get_recent_sentiment_insights(self, limit: int = 20) -> list[dict[str, Any]]:
+        """최근 감성 분석 결과를 조회합니다."""
+        try:
+            result = (
+                self._client.table("sentiment_insights")
+                .select("*")
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception:
+            logger.exception("감성 분석 결과 조회 실패")
+            return []
+
+    def cleanup_old_sentiment_insights(self, days: int = 7) -> None:
+        """오래된 감성 분석 결과를 정리합니다."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        try:
+            self._client.table("sentiment_insights").delete().lt("created_at", cutoff).execute()
+            logger.info("sentiment_insights %d일 이전 데이터 정리 완료", days)
+        except Exception:

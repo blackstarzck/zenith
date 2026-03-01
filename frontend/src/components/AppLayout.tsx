@@ -18,10 +18,12 @@ import {
   InfoCircleOutlined,
   FileTextOutlined,
   BookOutlined,
+  ExperimentOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { useSystemLogs, useBotState } from '../hooks/useSupabase';
+import { useSystemLogs, useBotState, useSentimentInsights } from '../hooks/useSupabase';
+import SentimentInsightPanel from './SentimentInsightPanel';
 import type { SystemLog, UpbitStatus, KakaoStatus } from '../types/database';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
@@ -107,6 +109,8 @@ export default function AppLayout() {
   const { botState } = useBotState();
   const [apiUsage] = useState(35);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sentimentDrawerOpen, setSentimentDrawerOpen] = useState(false);
+  const { insights, loading: insightsLoading } = useSentimentInsights(30);
   const [selectedDate, setSelectedDate] = useState<string>(dayjs().format('YYYY-MM-DD'));
   const { logs, loading: logsLoading } = useSystemLogs(selectedDate, 500, drawerOpen);
   const isToday = selectedDate === dayjs().format('YYYY-MM-DD');
@@ -232,6 +236,27 @@ export default function AppLayout() {
                 strokeWidth={10}
               />
             </div>
+          </Tooltip>
+
+          {/* 감성 인사이트 Drawer Toggle */}
+          <Tooltip title="뉴스 감성 분석" destroyOnHidden>
+            <Badge count={insights.length} size="small" offset={[-4, 4]} color="#722ed1">
+              <div
+                onClick={() => setSentimentDrawerOpen(true)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                  borderRadius: 6,
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = '#303030')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+              >
+                <ExperimentOutlined style={{ color: '#e0e0e0', fontSize: 16 }} />
+              </div>
+            </Badge>
           </Tooltip>
 
           {/* Log Drawer Toggle */}
@@ -438,6 +463,27 @@ export default function AppLayout() {
             })}
           </div>
         )}
+      </Drawer>
+      {/* Sentiment Insight Drawer */}
+      <Drawer
+        title={
+          <Space size={8}>
+            <span style={{ color: '#d0d0d0' }}>
+              <ExperimentOutlined style={{ marginRight: 8 }} />
+              뉴스 감성 분석
+            </span>
+          </Space>
+        }
+        placement="right"
+        size={480}
+        open={sentimentDrawerOpen}
+        onClose={() => setSentimentDrawerOpen(false)}
+        styles={{
+          header: { background: '#141414', borderBottom: '1px solid #303030' },
+          body: { background: '#0d0d0d', padding: 0 },
+        }}
+      >
+        <SentimentInsightPanel insights={insights} loading={insightsLoading} />
       </Drawer>
     </Layout>
   );

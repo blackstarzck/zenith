@@ -94,3 +94,23 @@ export interface DailyReport {
   loss_count: number;
   created_at: string;
 }
+export interface SentimentInsight {
+  id: number;
+  news_id: string;
+  title: string;
+  source: string | null;
+  url: string | null;
+  currencies: string[];
+  sentiment_score: number;         // -1.0 ~ 1.0
+  sentiment_label: 'bullish' | 'bearish' | 'neutral';
+  decision: 'BUY' | 'SELL' | 'HOLD' | 'WAIT';
+  confidence: number;              // 0 ~ 100
+  reasoning_chain: string | null;
+  keywords: string[];
+  positive_factors: string[];
+  negative_factors: string[];
+  volume_impact: boolean;
+  verification_result: 'correct' | 'incorrect' | null;
+  actual_price_change: number | null;
+  created_at: string;
+}

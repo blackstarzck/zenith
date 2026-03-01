@@ -46,7 +46,32 @@
 - **kelly_fraction**: DECIMAL | NULL (현재 켈리 비중 0.0~1.0, 데이터 부족 시 NULL)
 - **updated_at**: TIMESTAMP
 
+### 2.5 sentiment_insights (뉴스 감성 분석)
+CryptoPanic 뉴스를 Gemini 2.0 Flash Lite로 분석한 결과를 저장합니다.
+- **id**: BIGSERIAL (PK)
+- **news_id**: VARCHAR UNIQUE NOT NULL (CryptoPanic 뉴스 ID)
+- **title**: TEXT NOT NULL (뉴스 제목)
+- **source**: VARCHAR (뉴스 출처)
+- **url**: TEXT (원문 링크)
+- **currencies**: JSONB DEFAULT '[]' (관련 코인 목록)
+- **sentiment_score**: DECIMAL DEFAULT 0.0 (-1.0~1.0, 음수=약세, 양수=강세)
+- **sentiment_label**: VARCHAR DEFAULT 'neutral' (bullish/bearish/neutral)
+- **decision**: VARCHAR DEFAULT 'WAIT' (BUY/SELL/HOLD/WAIT)
+- **confidence**: DECIMAL DEFAULT 0.0 (0~100)
+- **reasoning_chain**: TEXT (AI 단계별 추론 과정)
+- **keywords**: JSONB DEFAULT '[]' (핵심 키워드)
+- **positive_factors**: JSONB DEFAULT '[]' (긍정 요인)
+- **negative_factors**: JSONB DEFAULT '[]' (부정 요인)
+- **volume_impact**: BOOLEAN DEFAULT FALSE (거래량 영향 여부)
+- **verification_result**: VARCHAR | NULL (correct/incorrect, 사후 검증)
+- **actual_price_change**: DECIMAL | NULL (실제 가격 변동률 %)
+- **created_at**: TIMESTAMPTZ DEFAULT now()
+- **인덱스**: created_at DESC, news_id UNIQUE, sentiment_label, currencies (GIN)
+
 
 ## 3. 데이터 보존 정책
 - **거래 기록**: 영구 보존 (수익 분석용)
 - **시스템 로그**: 30일 경과 시 자동 삭제 또는 백업 (DB 용량 관리)
+- **감성 분석 결과**: 7일 경과 시 자동 삭제 (orchestrator daily_reset에서 정리)
+- **가격 스냅샷**: 7일 경과 시 자동 삭제
+- **잔고 스냅샷**: 7일 경과 시 자동 삭제

@@ -7,6 +7,7 @@ import pytest
 from src.config import StrategyParams, AppConfig
 from src.strategy.engine import MeanReversionEngine, Signal
 from src.strategy.indicators import BollingerBands, IndicatorSnapshot
+from src.risk.manager import Position
 
 
 # ── 헬퍼 ─────────────────────────────────────────────────────
@@ -145,12 +146,13 @@ class TestEngineUpdateParams:
 
         # 기본 atr_stop_multiplier=2.5 → 손절선 = 50000 - 500*2.5 = 48750
         snap = make_snapshot(price=48800, atr=500)
-        signal = engine.evaluate_exit("KRW-BTC", snap, entry_price=50000)
+        pos = Position(symbol="KRW-BTC", entry_price=50000, volume=1.0, amount=50000)
+        signal = engine.evaluate_exit("KRW-BTC", snap, pos)
         assert signal.signal == Signal.HOLD  # 48800 > 48750
 
         # atr_stop_multiplier를 2.0으로 줄이면 손절선 = 50000 - 500*2.0 = 49000
         engine.update_params(StrategyParams(atr_stop_multiplier=2.0))
-        signal2 = engine.evaluate_exit("KRW-BTC", snap, entry_price=50000)
+        signal2 = engine.evaluate_exit("KRW-BTC", snap, pos)
         assert signal2.signal == Signal.STOP_LOSS  # 48800 < 49000
 
 

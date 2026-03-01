@@ -49,6 +49,8 @@ class BacktestPosition:
     volume: float
     amount: float
     has_sold_half: bool = False
+    trailing_high: float = 0.0
+    entry_fee: float = 0.0
 
 
 @dataclass
@@ -181,8 +183,7 @@ class BacktestEngine:
             if position is not None:
                 signal = strategy.evaluate_exit(
                     symbol, snapshot,
-                    position.entry_price,
-                    position.has_sold_half,
+                    position,
                 )
 
                 if signal.signal == Signal.STOP_LOSS:

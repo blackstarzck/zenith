@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Trade, DailyStat, SystemLog, BotState, PriceSnapshot, BalanceSnapshot, HeldPosition, DailyReport } from '../types/database';
+import type { Trade, DailyStat, SystemLog, BotState, PriceSnapshot, BalanceSnapshot, HeldPosition, DailyReport, SentimentInsight } from '../types/database';
 import dayjs from 'dayjs';
 import { useRecoveryTick } from './useRecoverySignal';
 
@@ -551,4 +551,44 @@ export function useDailyReport(reportDate: string | null) {
   }, [reportDate, recoveryTick]);
 
   return { report, loading };
+}
+
+/* ── Sentiment Insights (뉴스 감성 분석) ──────────────── */
+
+export function useSentimentInsights(limit = 30) {
+  const [insights, setInsights] = useState<SentimentInsight[]>([]);
+  const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('sentiment_insights')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    setInsights((data as SentimentInsight[]) ?? []);
+    setLoading(false);
+  }, [limit]);
+
+  useEffect(() => {
+    fetch();
+
+    const channel = supabase
+      .channel('sentiment-insights-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'sentiment_insights' },
+        (payload) => {
+          setInsights((prev) => [payload.new as SentimentInsight, ...prev].slice(0, limit));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetch, limit, recoveryTick]);
+
+  return { insights, loading, refetch: fetch };
 }

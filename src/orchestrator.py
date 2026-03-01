@@ -20,6 +20,8 @@ from src.storage.client import StorageClient
 from src.notifier.kakao import KakaoNotifier
 from src.report.generator import generate_daily_report
 from src.strategy.regime import classify_regime, MarketRegime
+from src.collector.news_collector import NewsCollector
+from src.strategy.sentiment import SentimentAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,16 @@ class Orchestrator:
         self._consecutive_errors: int = 0     # 연속 에러 횟수 (지수 백오프용)
         self._max_backoff_sec: int = 300          # 최대 백오프 5분
         self._current_regime: str = "ranging"  # 현재 시장 레짐
+
+        # 감성 분석 모듈 (API 키가 설정된 경우에만 활성화)
+        self._sentiment_enabled = bool(config.sentiment.groq_api_key and config.sentiment.cryptopanic_api_key)
+        if self._sentiment_enabled:
+            self._news_collector = NewsCollector(config.sentiment)
+            self._sentiment_analyzer = SentimentAnalyzer(config.sentiment)
+            self._seen_news_ids: set[str] = set()
+            logger.info("뉴스 감성 분석 모듈 활성화")
+        else:
+            logger.info("감성 분석 비활성화 — GROQ_API_KEY 또는 CRYPTOPANIC_API_KEY 미설정")
 
     # ── 안전한 알림 래퍼 ───────────────────────────────────
 
@@ -219,6 +231,10 @@ class Orchestrator:
                     self._storage.insert_balance_snapshot(balance)
                 except Exception as e:
                     logger.error("잔고 스냅샷 저장 실패: %s", e)
+
+        # 4-3. 뉴스 감성 분석 (약 5분 간격)
+        if self._sentiment_enabled and self._loop_count % self._config.sentiment.poll_interval_ticks == 0:
+            self._run_sentiment_cycle()
 
         # 5. 일일 리포트 (매일 08:00 1회 발송)
         if not self._daily_report_sent and datetime.now().hour >= 8:
@@ -691,6 +707,7 @@ class Orchestrator:
                     kakao=self._config.kakao,
                     strategy=new_params,
                     risk=self._config.risk,
+                    sentiment=self._config.sentiment,
                     loop_interval_sec=self._config.loop_interval_sec,
                     candle_interval=self._config.candle_interval,
                     candle_count=self._config.candle_count,
@@ -849,6 +866,53 @@ class Orchestrator:
                 self._storage.cleanup_old_balance_snapshots(days=7)
             except Exception as e:
                 logger.error("잔고 스냅샷 정리 실패: %s", e)
+
+            # 오래된 감성 분석 결과 정리 (7일 초과)
+            if self._sentiment_enabled:
+                try:
+                    self._storage.cleanup_old_sentiment_insights(days=7)
+                except Exception as e:
+                    logger.error("감성 분석 결과 정리 실패: %s", e)
+
+    def _run_sentiment_cycle(self) -> None:
+        """뉴스 수집 → 감성 분석 → DB 저장 사이클을 실행합니다."""
+        try:
+            news_list = self._news_collector.fetch_latest_news(self._seen_news_ids)
+            if not news_list:
+                return
+
+            analyzed = 0
+            for news in news_list:
+                try:
+                    analysis = self._sentiment_analyzer.analyze(
+                        title=news["title"],
+                        source=news["source"],
+                        currencies=news["currencies"],
+                    )
+
+                    insight = {
+                        "news_id": news["news_id"],
+                        "title": news["title"],
+                        "source": news["source"],
+                        "url": news["url"],
+                        "currencies": news["currencies"],
+                        **analysis,
+                    }
+
+                    self._storage.insert_sentiment_insight(insight)
+                    self._seen_news_ids.add(news["news_id"])
+                    analyzed += 1
+
+                    time.sleep(1.0)  # Gemini rate limit 방어
+
+                except Exception as e:
+                    logger.error("감성 분석 실패 [%s]: %s", news.get("title", "?")[:30], e)
+
+            if analyzed:
+                logger.info("[감성 분석] %d건 뉴스 분석 완료", analyzed)
+
+        except Exception:
+            logger.warning("감성 분석 사이클 실패 — 다음 주기에 재시도")
 
     def _send_daily_report(self) -> None:
         """일일 리포트를 전송합니다."""

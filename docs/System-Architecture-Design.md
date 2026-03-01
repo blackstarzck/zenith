@@ -17,11 +17,13 @@
 ### 3.1 데이터 수집부 (Data Collector)
 - **Upbit API Interface:** REST API 및 WebSocket을 통한 실시간 데이터 수집.
 - **Slippage Estimator:** 호가창 데이터를 분석하여 시장가 주문 시 예상 체결 가격(Slippage)을 산출.
+- **News Collector (`collector/news_collector.py`):** CryptoPanic API v1에서 암호화폐 관련 뉴스를 주기적으로 수집 (약 5분 간격). 중복 방지를 위한 seen_ids 관리.
 
 ### 3.2 전략 연산부 (Strategy Engine)
 - **Mean Reversion Logic:** 볼린저 밴드 및 RSI 기반 알고리즘 연산.
 - **Market Regime Detector (`strategy/regime.py`):** BTC-KRW 기반 시장 레짐 감지 (trending/ranging/volatile). 10분마다 판단하여 orchestrator에서 진입 필터로 사용.
 - **Risk Manager (`risk/manager.py`):** 켈리 공식(Kelly Criterion)을 활용한 동적 포지션 사이징 및 진입 전 슬리피지 임계치 검증.
+- **Sentiment Analyzer (`strategy/sentiment.py`):** Groq API (Llama 3.1 8B Instant)를 활용한 뉴스 감성 분석. CryptoPanic에서 수집한 뉴스 제목을 AI로 분석하여 bullish/bearish/neutral 판정 및 BUY/SELL/HOLD/WAIT 의사결정 생성.
 
 ### 3.3 주문 및 알림부 (Action Layer)
 - **Order Executor:** 매매 주문 집행 및 KakaoTalk 알림 전송.
@@ -43,6 +45,8 @@ graph TB
     subgraph EXT["외부 서비스"]
         UPBIT["Upbit API<br/>(REST + WebSocket)"]
         KAKAO["KakaoTalk API<br/>(나에게 보내기)"]
+        CPANIC["CryptoPanic API<br/>(뉴스 수집)"]
+        GROQ["Groq API<br/>(Llama 3.1 8B Instant)"]
     end
 
     subgraph PY["Python 백엔드 — 로컬 상시 구동"]
@@ -53,10 +57,12 @@ graph TB
         RISK["Risk Manager<br/>켈리/리스크 관리"]
         EXEC["Order Executor<br/>시장가 주문 집행"]
         NOTI["Notifier<br/>카카오톡 알림"]
+        NEWS["News Collector<br/>CryptoPanic 뉴스 수집"]
+        SENT["Sentiment Analyzer<br/>Groq AI 감성 분석"]
     end
 
     subgraph DB["Supabase — PostgreSQL"]
-        TABLES["trades / daily_stats / bot_state<br/>system_logs / price_snapshots<br/>balance_snapshots"]
+        TABLES["trades / daily_stats / bot_state<br/>system_logs / price_snapshots<br/>balance_snapshots / sentiment_insights"]
     end
 
     subgraph FE["React + AntD 대시보드"]
@@ -83,6 +89,11 @@ graph TB
     TICKER --> UI
     UI -->|"strategy_params 수정"| TABLES
     TABLES -.->|"~1분 폴링 hot reload"| ORCH
+    CPANIC -->|"뉴스 피드"| NEWS
+    NEWS --> SENT
+    SENT -->|"REST: 감성 분석"| GROQ
+    SENT --> TABLES
+    ORCH --> NEWS
 ```
 
 ### 4.2 데이터 흐름 상세
@@ -130,3 +141,4 @@ flowchart TD
 6. **[Upbit WebSocket]** → **[React Dashboard]** 실시간 시세 수신 (500ms 버퍼)
 7. **[React Dashboard]** → **[Supabase]** 전략 파라미터 수정 → **[Python Engine]** ~1분 폴링 반영
 8. **[Python Engine]** → **[KakaoTalk]** 매매 결과 알림 전송
+9. **[CryptoPanic]** → 뉴스 수집 → **[Groq API (Llama 3.1 8B)]** 감성 분석 → **[Supabase]** 결과 저장 → **[React Dashboard]** Realtime 구독으로 표시

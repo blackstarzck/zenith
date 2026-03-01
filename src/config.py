@@ -32,6 +32,23 @@ class KakaoConfig:
     access_token: str = field(default_factory=lambda: os.getenv("KAKAO_ACCESS_TOKEN", ""))
     refresh_token: str = field(default_factory=lambda: os.getenv("KAKAO_REFRESH_TOKEN", ""))
 
+@dataclass(frozen=True)
+class SentimentConfig:
+    """뉴스 감성 분석 설정 (Groq + CryptoPanic)."""
+    # API 키
+    groq_api_key: str = field(default_factory=lambda: os.getenv("GROQ_API_KEY", ""))
+    cryptopanic_api_key: str = field(default_factory=lambda: os.getenv("CRYPTOPANIC_API_KEY", ""))
+    # Groq 모델
+    groq_model: str = "llama-3.1-8b-instant"
+    # 뉴스 폴링 간격 (틱 수 기준, 10초 루프 × 30 = 약 5분)
+    poll_interval_ticks: int = 30
+    # 감성 분석 대상 코인 (CryptoPanic currencies 파라미터)
+    target_currencies: str = "BTC,ETH,XRP,SOL,DOGE,ADA"
+    # Groq API 타임아웃 (초)
+    api_timeout_sec: int = 30
+    # 한 번에 가져올 뉴스 수
+    max_news_per_poll: int = 10
+
 
 @dataclass(frozen=True)
 class StrategyParams:
@@ -148,6 +165,7 @@ class AppConfig:
     kakao: KakaoConfig = field(default_factory=KakaoConfig)
     strategy: StrategyParams = field(default_factory=StrategyParams)
     risk: RiskParams = field(default_factory=RiskParams)
+    sentiment: SentimentConfig = field(default_factory=SentimentConfig)
 
     # 메인 루프 간격 (초)
     loop_interval_sec: int = 10
