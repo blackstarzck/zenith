@@ -4,6 +4,9 @@ import type { Trade, DailyStat, SystemLog, BotState, PriceSnapshot, BalanceSnaps
 import dayjs from 'dayjs';
 import { useRecoveryTick } from './useRecoverySignal';
 
+/** Supabase 채널명 충돌 방지용 카운터 — 동일 훅이 복수 컴포넌트에서 사용될 때 고유성 보장 */
+let _chId = 0;
+
 /* ── Trades ─────────────────────────────────────────────── */
 
 export function useTrades(limit = 50) {
@@ -26,7 +29,7 @@ export function useTrades(limit = 50) {
     fetch();
 
     const channel = supabase
-      .channel('trades-realtime')
+      .channel(`trades-${++_chId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'trades' },
@@ -108,7 +111,7 @@ export function useSystemLogs(date: string | null = null, limit = 500, enabled =
     if (!enabled || !isToday) return;
 
     const channel = supabase
-      .channel('logs-realtime')
+      .channel(`logs-${++_chId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'system_logs' },
@@ -150,7 +153,7 @@ export function useBotState() {
     })();
 
     const channel = supabase
-      .channel('botstate-realtime')
+      .channel(`botstate-${++_chId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'bot_state' },
@@ -198,7 +201,7 @@ export function usePriceSnapshots(symbol: string | null, limit = 120) {
     if (!symbol) return;
 
     const channel = supabase
-      .channel(`price-snapshots-${symbol}`)
+      .channel(`price-snap-${symbol}-${++_chId}`)
       .on(
         'postgres_changes',
         {
@@ -279,7 +282,7 @@ export function useHeldSymbols() {
 
     // 실시간: price_snapshots INSERT + trades INSERT 구독
     const channel = supabase
-      .channel('held-symbols-realtime')
+      .channel(`held-sym-${++_chId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'price_snapshots' },
@@ -365,7 +368,8 @@ export function useHeldPositions(heldSymbols: string[]) {
       .from('trades')
       .select('*')
       .in('symbol', heldSymbols)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(100);
 
     const posMap = new Map<string, HeldPosition>();
     const fullyLiquidated = new Set<string>();
@@ -403,7 +407,7 @@ export function useHeldPositions(heldSymbols: string[]) {
 
     // 실시간: trades INSERT 구독으로 포지션 변경 즉시 반영
     const channel = supabase
-      .channel('held-positions-realtime')
+      .channel(`held-pos-${++_chId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'trades' },
@@ -445,7 +449,8 @@ export function useLatestSnapshots(heldSymbols: string[]) {
       .from('price_snapshots')
       .select('*')
       .in('symbol', heldSymbols)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(100);
 
     const snapMap = new Map<string, PriceSnapshot>();
     for (const row of (data as PriceSnapshot[]) ?? []) {
@@ -464,7 +469,7 @@ export function useLatestSnapshots(heldSymbols: string[]) {
 
     // 새 스냅샷 도착 시 자동 갱신
     const channel = supabase
-      .channel('latest-snapshots-realtime')
+      .channel(`latest-snap-${++_chId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'price_snapshots' },
@@ -512,7 +517,7 @@ export function useDailyReports(limit = 30) {
     fetch();
 
     const channel = supabase
-      .channel('daily-reports-realtime')
+      .channel(`daily-rep-${++_chId}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'daily_reports' },
