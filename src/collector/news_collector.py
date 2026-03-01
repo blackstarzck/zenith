@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -45,7 +46,6 @@ class NewsCollector:
         params = {
             "auth_token": self._api_key,
             "currencies": self._currencies,
-            "public": "true",
             "regions": "ko",
         }
 
@@ -60,23 +60,25 @@ class NewsCollector:
             news_list: list[dict[str, Any]] = []
 
             for result in results:
-                news_id = str(result.get("id", ""))
-                if not news_id or news_id in seen_ids:
+                title = result.get("title", "")
+                created_at = result.get("created_at", result.get("published_at", ""))
+
+                # v2 API는 id 필드를 제공하지 않음 → title+created_at 해시로 고유 ID 생성
+                raw_id = f"{title}:{created_at}"
+                news_id = hashlib.sha256(raw_id.encode()).hexdigest()[:16]
+
+                if not title or news_id in seen_ids:
                     continue
 
-                source_data = result.get("source", {})
-                source_title = source_data.get("title", "Unknown") if isinstance(source_data, dict) else "Unknown"
-                
-                currencies_data = result.get("currencies", [])
-                currencies = [c.get("code", "") for c in currencies_data if isinstance(c, dict) and "code" in c]
-
+                # v2 API는 source/url/currencies 필드를 제공하지 않음
+                # currencies는 요청 파라미터에서 가져옴
                 news_item = {
                     "news_id": news_id,
-                    "title": result.get("title", ""),
-                    "source": source_title,
-                    "url": result.get("url", ""),
-                    "currencies": currencies,
-                    "created_at": result.get("created_at", ""),
+                    "title": title,
+                    "source": "CryptoPanic",
+                    "url": "",
+                    "currencies": [c.strip() for c in self._currencies.split(",") if c.strip()],
+                    "created_at": created_at,
                 }
                 news_list.append(news_item)
 
