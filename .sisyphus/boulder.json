@@ -1,18 +1,9 @@
 {
-  "active_plan": null,
-  "completed_plans": [
-    {
-      "plan": "hybrid-regime-filter",
-      "plan_path": "C:\\Users\\찬기\\Desktop\\workspace\\projects\\zenith\\.sisyphus\\plans\\hybrid-regime-filter.md",
-      "started_at": "2026-02-28T09:45:53.870Z",
-      "completed_at": "2026-02-28T12:30:00.000Z",
-      "branch": "feat/hybrid-regime-filter",
-      "worktree_path": "C:\\Users\\찬기\\Desktop\\workspace\\projects\\zenith-hybrid-regime",
-      "commits": [
-        "a9826a0 feat: BTC 레짐 하드 차단을 하이브리드 오프셋 시스템으로 전환",
-        "22a2670 feat: 시장 레짐 파라미터 4개 프론트엔드 UI 노출",
-        "e3cdddc docs: 알고리즘 명세서에 하이브리드 레짐 오프셋 반영"
-      ]
-    }
-  ]
+  "active_plan": "C:\\Users\\찬기\\Desktop\\workspace\\projects\\zenith\\.sisyphus\\plans\\docs-sync-strategy-refactor.md",
+  "started_at": "2026-03-01T15:19:14.661Z",
+  "session_ids": [
+    "ses_356892a66ffey66BiVYLrk5zcB"
+  ],
+  "plan_name": "docs-sync-strategy-refactor",
+  "agent": "atlas"
 }

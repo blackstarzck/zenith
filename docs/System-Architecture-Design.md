@@ -21,7 +21,7 @@
 
 ### 3.2 전략 연산부 (Strategy Engine)
 - **Mean Reversion Logic:** 볼린저 밴드 및 RSI 기반 알고리즘 연산.
-- **Market Regime Detector (`strategy/regime.py`):** BTC-KRW 기반 시장 레짐 감지 (trending/ranging/volatile). 10분마다 판단하여 orchestrator에서 진입 필터로 사용.
+- **Market Regime Detector (`strategy/regime.py`):** BTC-KRW 기반 시장 레짐 감지 (trending/ranging/volatile). 2분마다 판단하여 orchestrator에서 진입 필터로 사용.
 - **Risk Manager (`risk/manager.py`):** 켈리 공식(Kelly Criterion)을 활용한 동적 포지션 사이징 및 진입 전 슬리피지 임계치 검증.
 - **Sentiment Analyzer (`strategy/sentiment.py`):** Groq API (Llama 3.1 8B Instant)를 활용한 뉴스 감성 분석. CryptoPanic에서 수집한 뉴스 제목을 AI로 분석하여 bullish/bearish/neutral 판정 및 BUY/SELL/HOLD/WAIT 의사결정 생성.
 
