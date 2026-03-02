@@ -1,58 +1,61 @@
-**실시간 뉴스 감성 기반 가상자산 자동 매매 시스템 PRD**
+**실시간 뉴스 감성 기반 가상자산 인사이트 시스템 PRD**
 
 **1. 개요**
-가상자산 시장의 실시간 뉴스를 수집하고, 수집된 정보의 감성 분석과 시장 데이터의 교차 검증을 통해 매매 신뢰도를 극대화하는 자동화 시스템을 구축한다.
+가상자산 시장의 실시간 뉴스를 수집하고, Groq AI를 활용한 감성 분석을 통해 대시보드에 실시간 인사이트를 제공하는 시스템을 구축한다. 이 시스템은 사용자에게 시장의 심리적 상태를 시각화하여 제공하는 것을 주 목적으로 한다.
 
 **2. 문제 정의 및 목표**
 
-* **문제:** 사용 중인 CryptoPanic Developer v2 API가 투표(Votes) 데이터를 제공하지 않아 단일 데이터 소스만으로는 뉴스 기반 매매 신뢰도를 보장할 수 없음.
-* **목표:** 무료 API(Alpha Vantage, DeFiLlama)와 로컬 AI(Llama 3)를 결합하여 투표 데이터를 대체할 수 있는 '다중 지표 검증 체계'를 구축하여 매매 승률을 높임.
+* **문제:** CryptoPanic Developer v2 API는 투표(Votes) 데이터를 제공하지 않아 뉴스의 시장 영향력을 정량적으로 판단하기 어려움.
+* **목표:** CryptoPanic 뉴스를 Groq AI(Llama 3.1 8B)로 분석하여 감성 점수와 투자 판단 인사이트를 도출하고, 이를 대시보드에 실시간으로 표시함.
 
 **3. 데이터 소스 및 API 구성**
 
-* **CryptoPanic (Developer v2):** 실시간 뉴스 제목(Title) 및 요약(Description) 데이터 수집. (언어: 한국어 및 영어)
-* **Alpha Vantage:** 수집된 뉴스 텍스트에 대한 감성 분석 수치(Sentiment Score, -0.35 ~ 0.35) 획득.
-* **DeFiLlama/Exchange API:** 실시간 거래량(Volume) 변동성 및 거래소 자금 흐름 데이터 모니터링.
-* **Ollama (Llama 3):** 로컬 환경에서의 뉴스 논리 구조 분석 및 최종 매매 의사결정.
+* **CryptoPanic (Developer v2):** 한국어 뉴스 데이터 수집 (`regions=ko`). 대상 코인: BTC, ETH, XRP, SOL, DOGE, ADA.
+* **Groq API (Llama 3.1 8B Instant):** 클라우드 기반 AI를 활용한 고속 감성 분석 및 추론 (OpenAI 호환 엔드포인트).
 
 **4. 주요 기능 요구사항**
 
 **4.1 뉴스 수집 및 전처리 (News Ingestion)**
 
-* CryptoPanic API를 통해 1~5분 간격으로 신규 뉴스를 폴링(Polling)한다.
-* 뉴스 제목과 요약 텍스트를 결합하여 분석용 데이터 셋을 생성한다.
+* 약 5분 간격(10초 루프 × 30틱)으로 CryptoPanic API를 폴링하여 최신 뉴스를 수집한다.
+* CryptoPanic v2 API가 고유 ID를 제공하지 않으므로, `hashlib.sha256(title:created_at)[:16]`을 사용하여 고유 ID를 생성하고 중복 수집을 방지한다.
+* 수집된 뉴스는 즉시 DB에 저장되며, 분석 전 상태인 `PENDING`으로 표시된다.
 
-**4.2 감성 수치화 및 교차 검증 (Sentiment Validation)**
+**4.2 감성 분석 (Sentiment Analysis)**
 
-* CryptoPanic에서 확보한 뉴스의 키워드를 Alpha Vantage API에 대조하여 객관적인 감성 점수를 추출한다.
-* 사용자 투표 데이터의 부재를 Alpha Vantage의 AI 감성 점수로 대체하여 정량적 지표를 확보한다.
+* Groq API를 호출하여 뉴스 제목과 관련 코인을 바탕으로 감성 분석을 수행한다.
+* 산출 지표: `sentiment_score`(-1.0~1.0), `sentiment_label`(bullish/bearish/neutral), `decision`(BUY/SELL/HOLD/WAIT), `confidence`(0~100), `reasoning_chain`, `keywords`, `positive_factors`, `negative_factors`.
+* 응답 형식은 `json_object`를 사용하여 정형화된 데이터를 확보한다.
 
 **4.3 시장 반응 확인 (Market Response Filter)**
 
-* 뉴스가 발생한 시점으로부터 특정 시간(예: 5분~10분) 내에 해당 코인의 거래량이 직전 평균 대비 20% 이상 증가하는지 확인한다.
-* 감성 점수와 거래량 증가가 동시에 발생할 때만 유효한 신호로 간주한다.
+* 본 파이프라인에서는 뉴스 텍스트 분석에 집중하며, 거래량 등 시장 데이터와의 결합은 미구현 상태임.
+* 실제 시장 반응 및 기술적 지표는 별도의 매매 엔진(`engine.py`)에서 처리된다.
 
-**4.4 로컬 AI 논리 검토 (AI Reasoning)**
+**4.4 AI 논리 검토 (AI Reasoning)**
 
-* 로컬에서 실행되는 Llama 3 모델을 통해 뉴스 제목과 요약 사이에 논리적 모순(예: 제목은 호재이나 내용은 규제 관련)이 있는지 검증한다.
-* 최종 "매수/매도/보류" 결정을 내리고 근거를 로그에 기록한다.
+* Groq 클라우드 API의 Llama 3.1 8B 모델을 사용하며, `temperature=0.2`, `max_completion_tokens=1024` 설정을 통해 일관된 분석 결과를 도출한다.
+* 분석 결과는 단계별 추론 과정(`reasoning_chain`)을 포함하여 사용자에게 분석 근거를 제공한다.
 
-**5. 매매 판단 로직 (High-Reliability Logic)**
+**5. 매매 판단 로직**
 
-1. **탐지:** CryptoPanic에서 특정 코인(예: BTC, ETH) 관련 뉴스 발생.
-2. **1차 필터:** Alpha Vantage 감성 점수가 설정값(예: 0.15 이상)을 초과하는지 확인.
-3. **2차 필터:** 거래소 API를 통해 실제 매수세(거래량 급증) 유입 여부 확인.
-4. **3차 필터:** Llama 3가 뉴스 텍스트의 신뢰성을 'High'로 판정.
-5. **실행:** 모든 조건 충족 시 CCXT를 통해 사전에 설정된 비중만큼 주문 집행.
+* **인사이트 제공 중심:** 감성 분석 결과는 `sentiment_insights` 테이블에 저장되어 React 대시보드에 실시간으로 표시된다.
+* **매매 분리:** 실제 매매 판단은 별도의 기술지표 엔진(`engine.py`)이 BB, RSI, ATR, ADX 등을 기반으로 수행하며, 감성 분석 결과가 매매 신호에 직접적으로 반영되지 않는다.
+* **2-Phase 파이프라인:**
+    1. **Phase 1 (수집):** 뉴스 수집 즉시 `decision='PENDING'`으로 DB에 저장하여 대시보드에 "AI 분석 중" 상태를 노출한다.
+    2. **Phase 2 (분석):** Groq API 분석 완료 후 결과를 DB에 `UPDATE`하며, Supabase Realtime을 통해 대시보드에 즉시 반영한다.
 
 **6. 시스템 아키텍처 및 흐름도**
 
-1. **Data Layer:** CryptoPanic(Text) + Alpha Vantage(Score) + DeFiLlama(Volume).
-2. **Analysis Layer:** Llama 3 로컬 엔진을 이용한 텍스트-지표 정합성 판단.
-3. **Execution Layer:** CCXT 기반 거래소 연동 및 리스크 관리(익절/손절 라인 적용).
+1. **Data Layer:** CryptoPanic API (뉴스 텍스트 수집)
+2. **Analysis Layer:** Groq API (Llama 3.1 8B 기반 감성 분석 및 추론)
+3. **Storage Layer:** Supabase (`sentiment_insights` 테이블 저장 및 관리)
+4. **Presentation Layer:** React 대시보드 (Supabase Realtime 구독을 통한 실시간 표시)
+
+* 매매 실행 시스템(pyupbit 기반)은 본 인사이트 파이프라인과 독립적으로 운영된다.
 
 **7. 예외 처리 및 리스크 관리**
 
-* **API 호출 제한:** 무료 플랜의 호출 횟수 제한(Rate Limit)을 준수하기 위한 캐싱 전략 수립.
-* **가짜 뉴스 대응:** 동일한 뉴스가 다수의 출처에서 동시다발적으로 발생하는지 체크하여 단일 출처발 노이즈 제거.
-* **네트워크 오류:** API 404 또는 500 에러 발생 시 즉시 시스템 중단 및 관리자 알림.
+* **Rate Limit 대응:** Groq 무료 티어 및 CryptoPanic API의 호출 제한을 준수하기 위해 `time.sleep` 및 폴링 간격 조절을 통한 방어 로직을 적용한다.
+* **네트워크 오류:** API 호출 실패 시 Exponential Backoff 전략을 사용하여 재시도하며, 지속적인 실패 시 로그를 기록한다.
+* **데이터 정리:** 시스템 부하 방지를 위해 7일 이상 경과한 오래된 인사이트 데이터는 자동으로 삭제(`cleanup_old_sentiment_insights`)한다.
