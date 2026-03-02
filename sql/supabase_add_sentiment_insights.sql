@@ -47,10 +47,8 @@ DROP POLICY IF EXISTS "Service role full access" ON sentiment_insights;
 CREATE POLICY "Service role full access" ON sentiment_insights
     FOR ALL USING (true) WITH CHECK (true);
 
--- 프론트엔드 anon 키로 조회/삽입 허용
-GRANT SELECT, INSERT, UPDATE, DELETE ON sentiment_insights TO anon;
-GRANT SELECT, INSERT, UPDATE, DELETE ON sentiment_insights TO authenticated;
+-- 모든 역할에 권한 부여 (anon=프론트엔드, service_role=백엔드)
+GRANT ALL PRIVILEGES ON sentiment_insights TO anon, authenticated, service_role;
 
 -- BIGSERIAL 시퀀스 권한 (INSERT 시 id 자동 생성 필요)
-GRANT USAGE, SELECT ON SEQUENCE sentiment_insights_id_seq TO anon;
-GRANT USAGE, SELECT ON SEQUENCE sentiment_insights_id_seq TO authenticated;
+GRANT ALL PRIVILEGES ON SEQUENCE sentiment_insights_id_seq TO anon, authenticated, service_role;
