@@ -52,6 +52,22 @@ const formatKellyBadge = (fraction: number | null | undefined) => {
   return { text: `Kelly ${pct}%`, color };
 };
 
+const getRegimeOffset = (regime: string, strategy: StrategyParams): number => {
+  if (regime === 'trending') return strategy.regime_trending_offset ?? 15;
+  if (regime === 'volatile') return strategy.regime_volatile_offset ?? 25;
+  return 0;
+};
+
+const HEADER_TOOLTIP_STYLE = {
+  maxWidth: 'min(92vw, 360px)',
+} as const;
+
+const HEADER_TOOLTIP_INNER_STYLE = {
+  whiteSpace: 'normal',
+  wordBreak: 'keep-all',
+  lineHeight: 1.5,
+} as const;
+
 /* ── 차트 기간 옵션 ────────────────────────────────────── */
 
 const CHART_RANGES = [
@@ -433,6 +449,82 @@ const buildBaseSymbolColumns = (strategyParams: StrategyParams | null): ColumnsT
       );
     },
   },
+  {
+    title: (
+      <Space size={4}>
+        <span>매도</span>
+        <Tooltip destroyOnHidden
+          title={
+            <div>
+              <div>청산 스코어 (가중치 합산)</div>
+              <div style={{ marginTop: 6 }}>
+                <span style={{ color: '#cf1322' }}>■</span> 임계치 이상 — 매도 임박
+              </div>
+              <div>
+                <span style={{ color: '#fa8c16' }}>■</span> 임계치 -15 이상 — 주의
+              </div>
+              <div>
+                <span style={{ color: '#389e0d' }}>■</span> 미달 — 보유 유지
+              </div>
+            </div>
+          }
+        >
+          <InfoCircleOutlined style={{ fontSize: 11, color: '#999', cursor: 'pointer' }} />
+        </Tooltip>
+      </Space>
+    ),
+    dataIndex: 'indicators',
+    width: 75,
+    align: 'center' as const,
+    render: (_: unknown, record: SymbolRow) => {
+      const ind = record.indicators;
+      // 비보유 종목 또는 지표 없음
+      if (!ind || !record.pos) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+
+      // 트레일링 스탑 대기 중
+      if (ind.exit_status === 'trailing') {
+        return <Text style={{ fontSize: 11, color: '#1890ff', fontWeight: 500 }}>트레일링</Text>;
+      }
+
+      const exitScore = ind.exit_score;
+      if (exitScore == null) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+
+      const weights = strategyParams ?? DEFAULT_STRATEGY;
+      const exitThreshold = weights.exit_score_threshold ?? 70;
+
+      // 매도 스코어: 높을수록 매도 임박 → 빨강
+      const color = exitScore >= exitThreshold ? '#cf1322' : exitScore >= exitThreshold - 15 ? '#fa8c16' : '#389e0d';
+
+      const breakdown: Record<string, { weight: number; score: number }> = {
+        'RSI↑': { weight: weights.w_exit_rsi_level ?? 1.0, score: ind.exit_rsi ?? 0 },
+        'BB↑': { weight: weights.w_exit_bb_position ?? 1.0, score: ind.exit_bb ?? 0 },
+        '수익': { weight: weights.w_exit_profit_pct ?? 1.0, score: ind.exit_profit ?? 0 },
+        'ADX': { weight: weights.w_exit_adx_trend ?? 1.0, score: ind.exit_adx ?? 0 },
+      };
+
+      return (
+        <Tooltip destroyOnHidden
+          title={
+            <div style={{ minWidth: 120 }}>
+              {Object.entries(breakdown).map(([name, { weight, score }]) => (
+                <div key={name} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                  <span>{name}:</span>
+                  <span>{Math.round(score)} (×{weight.toFixed(1)})</span>
+                </div>
+              ))}
+              <div style={{ borderTop: '1px solid #444', marginTop: 6, paddingTop: 6, textAlign: 'right' }}>
+                임계치: {exitThreshold.toFixed(1)}
+              </div>
+            </div>
+          }
+        >
+          <Text style={{ fontSize: 12, color, fontWeight: 600, cursor: 'help' }}>
+            {Math.round(exitScore)}
+          </Text>
+        </Tooltip>
+      );
+    },
+  },
   ];
 
 /* ── 손절가·익절가 헤더 (안정 참조) ───────────────────────── */
@@ -613,7 +705,7 @@ function buildTickerColumns(tickers: Map<string, TickerData>): ColumnsType<Symbo
 /* ── 테이블 안정 참조 (모듈 레벨) ─────────────────────── */
 
 const symbolRowClassName = (record: SymbolRow) => record.pos ? 'held-row' : '';
-const SYMBOL_TABLE_SCROLL = { x: 1200 } as const;
+const SYMBOL_TABLE_SCROLL = { x: 1280 } as const;
 
 /* ── SymbolTable (React.memo — 부모 re-render 격리) ──── */
 
@@ -692,6 +784,9 @@ export default function DashboardPage() {
   const { stats: chartStats, loading: chartStatsLoading } = useDailyStats(isHourly ? 30 : (chartRange as number));
   const { stats: summaryStats } = useDailyStats(2); // Summary Cards용: 오늘 + 어제 (차트 기간과 독립)
   const { botState } = useBotState();
+  const strategyForTooltip = useMemo<StrategyParams>(() => {
+    return { ...DEFAULT_STRATEGY, ...(botState?.strategy_params as Partial<StrategyParams> | undefined) };
+  }, [botState?.strategy_params]);
 
   /* 활성 프리셋 — botState.strategy_params에서 파생 */
   const strategyParamsRaw = botState?.strategy_params;
@@ -793,7 +888,40 @@ export default function DashboardPage() {
             <Tag color="blue" style={{ margin: 0 }}>{displayPreset}</Tag>
           )}
           {botState?.market_regime && REGIME_DISPLAY[botState.market_regime] && (
-            <Tooltip destroyOnHidden title="BTC 기준 시장 상태 (10분 간격 갱신)">
+            <Tooltip
+              destroyOnHidden
+              overlayStyle={HEADER_TOOLTIP_STYLE}
+              overlayInnerStyle={HEADER_TOOLTIP_INNER_STYLE}
+              title={(
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>시장 레짐 (BTC 기준)</div>
+                  <div>의미: 현재 시장 상태를 3가지로 분류해 진입 난이도를 자동 조절합니다.</div>
+                  <div style={{ marginTop: 6 }}>
+                    <span style={{ color: '#389e0d' }}>■</span> 횡보장: 추가 가산 없음 (offset +0)
+                  </div>
+                  <div>
+                    <span style={{ color: '#d48806' }}>■</span> 추세장: 임계치 +{strategyForTooltip.regime_trending_offset ?? 15}
+                  </div>
+                  <div>
+                    <span style={{ color: '#cf1322' }}>■</span> 변동성 폭발: 임계치 +{strategyForTooltip.regime_volatile_offset ?? 25}
+                  </div>
+                  <div style={{ marginTop: 8, borderTop: '1px solid #444', paddingTop: 8 }}>
+                    기준값:
+                    <div>- 추세장 판정: ADX ≥ {strategyForTooltip.regime_adx_trending_threshold ?? 25}</div>
+                    <div>- 변동성 폭발 판정: 변동성 비율 ≥ {strategyForTooltip.regime_vol_overload_ratio ?? 2.0}</div>
+                  </div>
+                  <div style={{ marginTop: 8 }}>
+                    현재 영향:
+                    {(() => {
+                      const offset = getRegimeOffset(botState.market_regime, strategyForTooltip);
+                      const base = strategyForTooltip.entry_score_threshold ?? 70;
+                      const effective = Math.min(base + offset, 99);
+                      return ` 진입 임계치 ${base} → ${effective}`;
+                    })()}
+                  </div>
+                </div>
+              )}
+            >
               <Tag color={REGIME_DISPLAY[botState.market_regime].color} style={{ margin: 0 }}>
                 {REGIME_DISPLAY[botState.market_regime].label}
               </Tag>
@@ -802,7 +930,31 @@ export default function DashboardPage() {
           {botState?.kelly_fraction != null && (() => {
             const badge = formatKellyBadge(botState.kelly_fraction);
             return badge ? (
-              <Tooltip title={`켈리 공식 기반 포지션 비중: ${badge.text}`}>
+              <Tooltip
+                destroyOnHidden
+                overlayStyle={HEADER_TOOLTIP_STYLE}
+                overlayInnerStyle={HEADER_TOOLTIP_INNER_STYLE}
+                title={(
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>Kelly 비중</div>
+                    <div>의미: 최근 승률/손익비로 계산한 권장 포지션 비중입니다.</div>
+                    <div style={{ marginTop: 6 }}>
+                      현재 값: <b>{badge.text}</b>
+                    </div>
+                    <div style={{ marginTop: 8 }}>
+                      시스템 영향:
+                      <div>- 값이 클수록 종목당 주문 금액이 커집니다.</div>
+                      <div>- 값이 작을수록 주문 금액이 작아져 방어적으로 운용됩니다.</div>
+                      <div>- 0% 이하면 신규 진입이 매우 보수적으로 제한됩니다.</div>
+                    </div>
+                    <div style={{ marginTop: 8, borderTop: '1px solid #444', paddingTop: 8 }}>
+                      참고:
+                      <div>- Kelly는 상한(최대 포지션 비중) 이내에서만 반영됩니다.</div>
+                      <div>- 데이터가 부족하면 고정 비중 로직으로 동작할 수 있습니다.</div>
+                    </div>
+                  </div>
+                )}
+              >
                 <Tag color={badge.color} style={{ margin: 0 }}>{badge.text}</Tag>
               </Tooltip>
             ) : null;
