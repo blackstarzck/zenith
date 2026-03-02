@@ -25,6 +25,7 @@ const DECISION_COLORS: Record<string, string> = {
   SELL: '#ff4d4f',
   HOLD: '#faad14',
   WAIT: '#8c8c8c',
+  PENDING: '#1890ff',
 };
 
 export default function SentimentInsightPanel({ insights, loading }: SentimentInsightPanelProps) {
@@ -138,48 +139,53 @@ export default function SentimentInsightPanel({ insights, loading }: SentimentIn
                 <Tag
                   color={DECISION_COLORS[insight.decision] || '#8c8c8c'}
                   style={{ margin: 0, fontWeight: 600, border: 'none' }}
+                  icon={insight.decision === 'PENDING' ? <Spin size="small" style={{ marginRight: 4 }} /> : undefined}
                 >
-                  {insight.decision}
+                  {insight.decision === 'PENDING' ? 'AI 분석 중' : insight.decision}
                 </Tag>
               </div>
 
-              {/* 감성 바 */}
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <Text style={{ fontSize: 11, color: COLOR_BEARISH }}>약세</Text>
-                  <Text style={{ fontSize: 11, color: insight.sentiment_label === 'bullish' ? COLOR_BULLISH : insight.sentiment_label === 'bearish' ? COLOR_BEARISH : COLOR_NEUTRAL }}>
-                    {insight.sentiment_label === 'bullish' ? '강세' : insight.sentiment_label === 'bearish' ? '약세' : '중립'} ({score.toFixed(2)})
-                  </Text>
+              {insight.decision !== 'PENDING' && (
+                <>
+                  {/* 감성 바 */}
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={{ fontSize: 11, color: COLOR_BEARISH }}>약세</Text>
+                      <Text style={{ fontSize: 11, color: insight.sentiment_label === 'bullish' ? COLOR_BULLISH : insight.sentiment_label === 'bearish' ? COLOR_BEARISH : COLOR_NEUTRAL }}>
+                        {insight.sentiment_label === 'bullish' ? '강세' : insight.sentiment_label === 'bearish' ? '약세' : '중립'} ({score.toFixed(2)})
+                      </Text>
 
-                  <Text style={{ fontSize: 11, color: '#1890ff' }}>강세</Text>
-                </div>
-                <div style={{ height: 6, background: '#303030', borderRadius: 3, position: 'relative', overflow: 'hidden' }}>
-                  {/* 중앙선 */}
-                  <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: '#555', zIndex: 1 }} />
-                  {/* 채워지는 바 */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      bottom: 0,
-                      left: barLeft,
-                      width: barWidth,
-                      background: barColor,
-                      borderRadius: 3,
-                      transition: 'all 0.3s ease',
-                    }}
-                  />
-                </div>
-              </div>
+                      <Text style={{ fontSize: 11, color: '#1890ff' }}>강세</Text>
+                    </div>
+                    <div style={{ height: 6, background: '#303030', borderRadius: 3, position: 'relative', overflow: 'hidden' }}>
+                      {/* 중앙선 */}
+                      <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: '#555', zIndex: 1 }} />
+                      {/* 채워지는 바 */}
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          bottom: 0,
+                          left: barLeft,
+                          width: barWidth,
+                          background: barColor,
+                          borderRadius: 3,
+                          transition: 'all 0.3s ease',
+                        }}
+                      />
+                    </div>
+                  </div>
 
-              {/* 키워드 칩 */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: isExpanded ? 12 : 0 }}>
-                {insight.keywords.slice(0, 5).map((kw, idx) => (
-                  <Tag key={idx} style={{ background: '#1f1f1f', borderColor: '#303030', color: '#aaa', margin: 0, fontSize: 11 }}>
-                    {kw}
-                  </Tag>
-                ))}
-              </div>
+                  {/* 키워드 칩 */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: isExpanded ? 12 : 0 }}>
+                    {insight.keywords.slice(0, 5).map((kw, idx) => (
+                      <Tag key={idx} style={{ background: '#1f1f1f', borderColor: '#303030', color: '#aaa', margin: 0, fontSize: 11 }}>
+                        {kw}
+                      </Tag>
+                    ))}
+                  </div>
+                </>
+              )}
 
               {/* 상세 (Collapse) */}
               {isExpanded && (

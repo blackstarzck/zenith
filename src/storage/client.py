@@ -455,6 +455,25 @@ class StorageClient:
         except Exception:
             logger.exception("감성 분석 결과 저장 실패: %s", data.get("news_id", "?"))
             return {}
+    def update_sentiment_insight(self, news_id: str, analysis: dict[str, Any]) -> bool:
+        """뉴스 감성 분석 결과를 업데이트합니다 (2-phase: 뉴스 먼저 저장 → 분석 후 업데이트)."""
+        try:
+            update_data = {
+                "sentiment_score": analysis.get("sentiment_score", 0.0),
+                "sentiment_label": analysis.get("sentiment_label", "neutral"),
+                "decision": analysis.get("decision", "WAIT"),
+                "confidence": analysis.get("confidence", 0.0),
+                "reasoning_chain": analysis.get("reasoning_chain"),
+                "keywords": analysis.get("keywords", []),
+                "positive_factors": analysis.get("positive_factors", []),
+                "negative_factors": analysis.get("negative_factors", []),
+            }
+            result = self._client.table("sentiment_insights").update(update_data).eq("news_id", news_id).execute()
+            logger.info("감성 분석 업데이트: %s", news_id[:16])
+            return bool(result.data)
+        except Exception:
+            logger.exception("감성 분석 업데이트 실패: %s", news_id)
+            return False
 
     def get_recent_sentiment_insights(self, limit: int = 20) -> list[dict[str, Any]]:
         """최근 감성 분석 결과를 조회합니다."""

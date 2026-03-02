@@ -40,6 +40,13 @@ export interface SymbolIndicators {
   rsi: number;           // RSI 값 (0~100)
   rsi_slope: number;     // RSI 기울기 (양수=상승전환)
   adx: number;           // ADX 값 (0~100, 낮을수록 횡보=평균회귀 유리)
+  // 매도 스코어 (보유 종목에만 존재, 백엔드에서 계산)
+  exit_score?: number | null;    // 매도 가중합산 점수 (0~100), null이면 트레일링 대기
+  exit_rsi?: number;             // RSI 과매수 스코어 (0~100)
+  exit_bb?: number;              // BB 상단 접근 스코어 (0~100)
+  exit_profit?: number;          // 수익률 스코어 (0~100)
+  exit_adx?: number;             // ADX 추세 강도 스코어 (0~100)
+  exit_status?: string;          // "trailing" = 트레일링 스탑 대기 중
 }
 
 export interface BotState {
@@ -103,7 +110,7 @@ export interface SentimentInsight {
   currencies: string[];
   sentiment_score: number;         // -1.0 ~ 1.0
   sentiment_label: 'bullish' | 'bearish' | 'neutral';
-  decision: 'BUY' | 'SELL' | 'HOLD' | 'WAIT';
+  decision: 'BUY' | 'SELL' | 'HOLD' | 'WAIT' | 'PENDING';
   confidence: number;              // 0 ~ 100
   reasoning_chain: string | null;
   keywords: string[];

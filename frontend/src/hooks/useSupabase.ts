@@ -588,6 +588,19 @@ export function useSentimentInsights(limit = 30) {
           setInsights((prev) => [payload.new as SentimentInsight, ...prev].slice(0, limit));
         },
       )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'sentiment_insights' },
+        (payload) => {
+          setInsights((prev) =>
+            prev.map((item) =>
+              item.id === (payload.new as SentimentInsight).id
+                ? (payload.new as SentimentInsight)
+                : item,
+            ),
+          );
+        },
+      )
       .subscribe();
 
     return () => {

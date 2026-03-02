@@ -67,6 +67,9 @@ class Orchestrator:
         self._entry_blocked_until: datetime | None = None  # 진입 차단 해제 시각
         self._regime_changed_at: datetime | None = None  # 레짐 변경 시각 (플래핑 방지)
 
+        # 매도 스코어 임시 저장 (tick 내 2-phase 병합용)
+        self._exit_scores: dict[str, dict] = {}
+
         # 감성 분석 모듈 (API 키가 설정된 경우에만 활성화)
         self._sentiment_enabled = bool(config.sentiment.groq_api_key and config.sentiment.cryptopanic_api_key)
         if self._sentiment_enabled:
@@ -281,6 +284,18 @@ class Orchestrator:
                 # Position 객체 직접 전달
                 signal = self._strategy.evaluate_exit(symbol, snapshot, pos, regime=self._current_regime)
 
+                # 매도 스코어 수집 (Phase 1: 임시 저장 → _evaluate_entries에서 병합)
+                if signal.score is not None:
+                    self._exit_scores[symbol] = {
+                        "exit_score": round(signal.score, 1),
+                        "exit_rsi": round(self._strategy._score_exit_rsi_level(snapshot.rsi), 0),
+                        "exit_bb": round(self._strategy._score_exit_bb_position(snapshot.current_price, snapshot.bb), 0),
+                        "exit_profit": round(self._strategy._score_exit_profit(snapshot.current_price, pos.entry_price), 0),
+                        "exit_adx": round(self._strategy._score_exit_adx(snapshot.adx), 0),
+                    }
+                else:
+                    self._exit_scores[symbol] = {"exit_score": None, "exit_status": "trailing"}
+
                 if signal.signal == Signal.STOP_LOSS:
                     self._execute_sell_all(symbol, pos, signal.reason, label="손절 매도")
                     # 연속 손절 브레이커: 손절 시각 기록
@@ -419,6 +434,18 @@ class Orchestrator:
                 logger.debug("진입 평가 건너뜀 [%s]: %s", symbol, e)
             except Exception as e:
                 logger.error("진입 평가 오류 [%s]: %s", symbol, e)
+
+        # Phase 2: 매도 스코어 병합 (exit scores → symbol_indicators)
+        positions = self._risk.get_all_positions()
+        for sym, exit_data in self._exit_scores.items():
+            if sym not in positions:
+                continue  # 이미 매도된 종목의 stale 데이터 무시
+            if sym in symbol_indicators:
+                symbol_indicators[sym].update(exit_data)
+            else:
+                # 보유 종목이 상위 종목에 없는 경우 (extraHeld)
+                symbol_indicators[sym] = exit_data
+        self._exit_scores.clear()
 
         # 지표 데이터를 bot_state에 저장
         if symbol_indicators:
@@ -939,41 +966,50 @@ class Orchestrator:
                     logger.error("감성 분석 결과 정리 실패: %s", e)
 
     def _run_sentiment_cycle(self) -> None:
-        """뉴스 수집 → 감성 분석 → DB 저장 사이클을 실행합니다."""
+        """뉴스 수집 → 즉시 저장 → 감성 분석 → 업데이트 사이클을 실행합니다."""
         try:
             news_list = self._news_collector.fetch_latest_news(self._seen_news_ids)
             if not news_list:
                 return
 
-            analyzed = 0
+            # Phase 1: 뉴스 즉시 저장 (decision='PENDING')
+            saved_news = []
             for news in news_list:
+                try:
+                    row = {
+                        "news_id": news["news_id"],
+                        "title": news["title"],
+                        "source": news["source"],
+                        "url": news["url"],
+                        "currencies": news["currencies"],
+                        "decision": "PENDING",
+                    }
+                    self._storage.insert_sentiment_insight(row)
+                    self._seen_news_ids.add(news["news_id"])
+                    saved_news.append(news)
+                except Exception as e:
+                    logger.error("뉴스 저장 실패 [%s]: %s", news.get("title", "?")[:30], e)
+
+            if saved_news:
+                logger.info("[감성 분석] %d건 뉴스 저장 완료, AI 분석 시작", len(saved_news))
+
+            # Phase 2: AI 감성 분석 후 업데이트
+            analyzed = 0
+            for news in saved_news:
                 try:
                     analysis = self._sentiment_analyzer.analyze(
                         title=news["title"],
                         source=news["source"],
                         currencies=news["currencies"],
                     )
-
-                    insight = {
-                        "news_id": news["news_id"],
-                        "title": news["title"],
-                        "source": news["source"],
-                        "url": news["url"],
-                        "currencies": news["currencies"],
-                        **analysis,
-                    }
-
-                    self._storage.insert_sentiment_insight(insight)
-                    self._seen_news_ids.add(news["news_id"])
+                    self._storage.update_sentiment_insight(news["news_id"], analysis)
                     analyzed += 1
-
-                    time.sleep(1.0)  # Gemini rate limit 방어
-
+                    time.sleep(1.0)  # Groq rate limit 방어
                 except Exception as e:
                     logger.error("감성 분석 실패 [%s]: %s", news.get("title", "?")[:30], e)
 
             if analyzed:
-                logger.info("[감성 분석] %d건 뉴스 분석 완료", analyzed)
+                logger.info("[감성 분석] %d건 AI 분석 완료", analyzed)
 
         except Exception:
             logger.warning("감성 분석 사이클 실패 — 다음 주기에 재시도")
