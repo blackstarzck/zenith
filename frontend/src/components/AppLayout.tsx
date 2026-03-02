@@ -19,6 +19,7 @@ import {
   FileTextOutlined,
   BookOutlined,
   ExperimentOutlined,
+  FundProjectionScreenOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -35,6 +36,8 @@ const menuItems = [
   { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: '/trading', icon: <SwapOutlined />, label: 'Trading' },
   { key: '/analytics', icon: <BarChartOutlined />, label: 'Analytics' },
+  { key: '/sentiment-impact', icon: <ExperimentOutlined />, label: '감성 영향도' },
+  { key: '/dislocation-paper', icon: <FundProjectionScreenOutlined />, label: '괴리 모의매매' },
   { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
   { key: '/reports', icon: <FileTextOutlined />, label: 'Reports' },
   { key: '/guide', icon: <BookOutlined />, label: 'Guide' },

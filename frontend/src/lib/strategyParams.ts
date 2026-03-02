@@ -15,7 +15,7 @@ export const DEFAULT_STRATEGY: StrategyParams = {
   w_bb_recovery: 1.0,
   w_rsi_slope: 1.0,
   w_rsi_level: 1.0,
-  entry_score_threshold: 70,
+  entry_score_threshold: 78,
   w_exit_rsi_level: 1.0,
   w_exit_bb_position: 1.0,
   w_exit_profit_pct: 1.0,
@@ -27,7 +27,7 @@ export const DEFAULT_STRATEGY: StrategyParams = {
   // 시장 레짐 설정
   regime_adx_trending_threshold: 25,
   regime_vol_overload_ratio: 2.0,
-  regime_trending_offset: 15,
+  regime_trending_offset: 20,
   regime_volatile_offset: 25,
 };
 

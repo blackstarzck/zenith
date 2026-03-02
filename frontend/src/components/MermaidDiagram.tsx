@@ -99,7 +99,7 @@ export default function MermaidDiagram({ chart }: MermaidDiagramProps) {
   }, [fitScale]);
 
   if (error) {
-    return <Alert type="error" showIcon message="다이어그램 렌더링 오류" description={error} />;
+    return <Alert type="error" showIcon title="다이어그램 렌더링 오류" description={error} />;
   }
 
   if (loading || !svg) {

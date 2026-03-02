@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -25,9 +26,103 @@ class NewsCollector:
         """
         self._api_key = config.cryptopanic_api_key
         self._currencies = config.target_currencies
+        self._target_currencies = [c.strip().upper() for c in self._currencies.split(",") if c.strip()]
+        self._target_currency_set = set(self._target_currencies)
         self._max_news = config.max_news_per_poll
         self._timeout = config.api_timeout_sec
         self._endpoint = "https://cryptopanic.com/api/developer/v2/posts/"
+        self._alias_map: dict[str, str] = {
+            "비트코인": "BTC",
+            "이더리움": "ETH",
+            "리플": "XRP",
+            "솔라나": "SOL",
+            "도지코인": "DOGE",
+            "에이다": "ADA",
+            "카르다노": "ADA",
+            "BITCOIN": "BTC",
+            "ETHEREUM": "ETH",
+            "RIPPLE": "XRP",
+            "SOLANA": "SOL",
+            "DOGECOIN": "DOGE",
+            "CARDANO": "ADA",
+        }
+        self._market_symbol_pattern = re.compile(r"\b(?:KRW|BTC|USDT)-([A-Z0-9]{2,12})\b")
+        self._ticker_pattern = re.compile(r"\b([A-Z]{2,12})\b")
+
+    def _dedupe_keep_order(self, items: list[str]) -> list[str]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            if item not in seen:
+                seen.add(item)
+                unique.append(item)
+        return unique
+
+    def _extract_currencies_from_result(self, result: dict[str, Any]) -> list[str]:
+        raw = result.get("currencies")
+        if not raw:
+            return []
+
+        extracted: list[str] = []
+        if isinstance(raw, list):
+            for item in raw:
+                if isinstance(item, str):
+                    extracted.append(item.upper().replace("KRW-", "").strip())
+                elif isinstance(item, dict):
+                    code = (
+                        item.get("code")
+                        or item.get("currency")
+                        or item.get("symbol")
+                        or item.get("ticker")
+                    )
+                    if isinstance(code, str) and code.strip():
+                        extracted.append(code.upper().replace("KRW-", "").strip())
+        elif isinstance(raw, str):
+            extracted.extend([c.strip().upper().replace("KRW-", "") for c in raw.split(",") if c.strip()])
+
+        return [c for c in self._dedupe_keep_order(extracted) if c in self._target_currency_set]
+
+    def _extract_currencies_from_title(self, title: str) -> list[str]:
+        upper_title = title.upper()
+        matches: list[tuple[int, str]] = []
+
+        # KRW-BTC 같은 마켓 표기 우선 추출
+        for match in self._market_symbol_pattern.finditer(upper_title):
+            symbol = match.group(1)
+            if symbol in self._target_currency_set:
+                matches.append((match.start(), symbol))
+
+        # BTC/ETH 같은 티커 토큰 추출
+        for match in self._ticker_pattern.finditer(upper_title):
+            token = match.group(1)
+            if token in self._target_currency_set:
+                matches.append((match.start(), token))
+
+        # 한글/영문 풀네임 별칭 매핑
+        for alias, symbol in self._alias_map.items():
+            idx = title.find(alias)
+            if idx < 0:
+                idx = upper_title.find(alias)
+            if idx >= 0 and symbol in self._target_currency_set:
+                matches.append((idx, symbol))
+
+        matches.sort(key=lambda x: x[0])
+        ordered = [symbol for _, symbol in matches]
+        return self._dedupe_keep_order(ordered)
+
+    def infer_currencies(self, *, title: str, result: dict[str, Any] | None = None) -> list[str]:
+        """뉴스 단위 코인 목록을 추론합니다.
+
+        우선순위:
+        1) API 응답의 currencies 필드
+        2) 제목 기반 심볼/티커/별칭 추출
+        """
+        extracted: list[str] = []
+        if result is not None:
+            extracted = self._extract_currencies_from_result(result)
+        if not extracted:
+            extracted = self._extract_currencies_from_title(title)
+        return extracted
 
     def fetch_latest_news(self, seen_ids: set[str]) -> list[dict[str, Any]]:
         """
@@ -70,14 +165,14 @@ class NewsCollector:
                 if not title or news_id in seen_ids:
                     continue
 
-                # v2 API는 source/url/currencies 필드를 제공하지 않음
-                # currencies는 요청 파라미터에서 가져옴
+                extracted = self.infer_currencies(title=title, result=result)
+
                 news_item = {
                     "news_id": news_id,
                     "title": title,
                     "source": "CryptoPanic",
                     "url": "",
-                    "currencies": [c.strip() for c in self._currencies.split(",") if c.strip()],
+                    "currencies": extracted,
                     "created_at": created_at,
                 }
                 news_list.append(news_item)

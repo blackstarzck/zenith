@@ -20,6 +20,25 @@ class UpbitConfig:
 
 
 @dataclass(frozen=True)
+class BinanceConfig:
+    """바이낸스 시세 비교용 설정."""
+    api_key: str = field(default_factory=lambda: os.getenv("BINANCE_API_KEY", ""))
+    secret_key: str = field(default_factory=lambda: os.getenv("BINANCE_SECRET_KEY", ""))
+    base_url: str = "https://api.binance.com"
+    ws_url: str = "wss://stream.binance.com:9443/ws"
+    quote_asset: str = "USDT"
+
+
+@dataclass(frozen=True)
+class FxConfig:
+    """환율(USDT-KRW) 환산 설정."""
+    usdt_krw_source: str = field(default_factory=lambda: os.getenv("USDT_KRW_SOURCE", "upbit"))
+    upbit_usdt_market: str = field(default_factory=lambda: os.getenv("UPBIT_USDT_MARKET", "KRW-USDT"))
+    fallback_rate: float = field(default_factory=lambda: float(os.getenv("USDT_KRW_FALLBACK_RATE", "1300")))
+    refresh_interval_sec: int = field(default_factory=lambda: int(os.getenv("USDT_KRW_REFRESH_INTERVAL_SEC", "5")))
+
+
+@dataclass(frozen=True)
 class SupabaseConfig:
     url: str = field(default_factory=lambda: os.getenv("SUPABASE_URL", ""))
     secret_key: str = field(default_factory=lambda: os.getenv("SUPABASE_SECRET_KEY", ""))
@@ -48,6 +67,16 @@ class SentimentConfig:
     api_timeout_sec: int = 30
     # 한 번에 가져올 뉴스 수
     max_news_per_poll: int = 10
+    # 사후 검증 기준 시간 (분)
+    verification_horizon_minutes: int = 60
+    verification_horizon_short_minutes: int = 30
+    verification_horizon_long_minutes: int = 180
+    horizon_ab_confidence_threshold: float = 80.0
+    # HOLD/WAIT 판정의 허용 변동폭 (%), 절대값 기준
+    hold_neutral_threshold_pct: float = 0.3
+    directional_decision_min_confidence: float = 80.0
+    directional_decision_min_abs_score: float = 0.45
+    directional_neutral_band_pct: float = 0.15
 
 
 @dataclass(frozen=True)
@@ -115,6 +144,8 @@ class StrategyParams:
     w_rsi_level: float = 1.3        # 과매도 수준 가장 중요
 
     # 스코어링 진입 임계치 (0~100, 가중합산 스코어가 이 값 이상이면 BUY)
+    # 기본값 78.0은 15분봉 기준 과최적화를 피하면서 거래 빈도/승률 균형이 가장 안정적이었던
+    # 운영 튜닝값입니다. 레짐 오프셋(+20/+25) 적용 시 실효 임계치는 더 높아질 수 있습니다.
     entry_score_threshold: float = 78.0
     # 매도 청산 스코어링 가중치 (0.0 = 비활성, 높을수록 비중 큼)
     w_exit_rsi_level: float = 1.0       # RSI 과매수 → 높은 청산 점수
@@ -175,6 +206,8 @@ class RiskParams:
 @dataclass(frozen=True)
 class AppConfig:
     upbit: UpbitConfig = field(default_factory=UpbitConfig)
+    binance: BinanceConfig = field(default_factory=BinanceConfig)
+    fx: FxConfig = field(default_factory=FxConfig)
     supabase: SupabaseConfig = field(default_factory=SupabaseConfig)
     kakao: KakaoConfig = field(default_factory=KakaoConfig)
     strategy: StrategyParams = field(default_factory=StrategyParams)

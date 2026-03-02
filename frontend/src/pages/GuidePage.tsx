@@ -121,7 +121,7 @@ export default function GuidePage() {
 
           {/* 4. Highlights */}
           {section.content.highlights?.map((highlight, idx) => (
-            <Alert key={idx} type="info" showIcon message={highlight} />
+            <Alert key={idx} type="info" showIcon title={highlight} />
           ))}
 
           {/* 5. Formulas */}
@@ -310,7 +310,7 @@ export default function GuidePage() {
             type="success"
             showIcon
             style={{ marginBottom: 16 }}
-            message="처음 보시는 분은 오른쪽 용어 사전부터 읽고, 이후에 각 전략 섹션을 보시면 훨씬 이해가 쉽습니다."
+            title="처음 보시는 분은 오른쪽 용어 사전부터 읽고, 이후에 각 전략 섹션을 보시면 훨씬 이해가 쉽습니다."
           />
           <Collapse defaultActiveKey={['overview']} items={collapseItems} />
         </Col>

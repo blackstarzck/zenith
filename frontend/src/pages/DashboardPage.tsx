@@ -81,49 +81,75 @@ const CHART_RANGES = [
 
 function parseInd(v: unknown): SymbolIndicators | undefined {
   if (v == null) return undefined;
-  if (typeof v === 'object' && 'vol' in (v as object)) return v as SymbolIndicators;
-  // 이전 형식: number (변동성만 저장)
-  if (typeof v === 'number') return { vol: v, trend: 'unknown', bb: 'none', rsi: 50, rsi_slope: 0, adx: 25 };
-  return undefined;
-}
-function calcEntryScore(ind: SymbolIndicators | undefined, weights: StrategyParams | null): { total: number; breakdown: Record<string, { weight: number; score: number }> } {
-  if (!ind || !weights) return { total: 0, breakdown: {} };
+  if (typeof v === 'number') {
+    return { vol: v, trend: 'unknown', bb: 'none', rsi: 50, rsi_slope: 0, adx: 25 };
+  }
+  if (typeof v !== 'object') return undefined;
 
-  const vol = ind.vol ?? 0;
-  const trend = ind.trend ?? 'unknown';
-  const adx = ind.adx ?? 25;
-  const bb = ind.bb ?? 'none';
-  const rsi_slope = ind.rsi_slope ?? 0;
-  const rsi = ind.rsi ?? 50;
+  const raw = v as Record<string, unknown>;
 
-  const s_vol = Math.max(0, Math.min(100, ((3.0 - vol) / 2.0) * 100));
-  const s_ma = trend === 'up' ? 100 : trend === 'down' ? 0 : 50;
-  const s_adx = Math.max(0, Math.min(100, ((40 - adx) / 25) * 100));
-  const s_bb = bb === 'recovered' ? 100 : bb === 'below' ? 30 : 0;
-  const s_rsi_slope = Math.max(0, Math.min(100, (rsi_slope / 3.0) * 100));
-  const s_rsi = Math.max(0, Math.min(100, ((45 - rsi) / 25) * 100));
-
-  const breakdown: Record<string, { weight: number; score: number }> = {
-    '변동성': { weight: weights.w_volatility ?? 1.0, score: s_vol },
-    '추세': { weight: weights.w_ma_trend ?? 1.0, score: s_ma },
-    'ADX': { weight: weights.w_adx ?? 1.0, score: s_adx },
-    'BB': { weight: weights.w_bb_recovery ?? 1.0, score: s_bb },
-    'RSI↗': { weight: weights.w_rsi_slope ?? 1.0, score: s_rsi_slope },
-    'RSI': { weight: weights.w_rsi_level ?? 1.0, score: s_rsi },
+  const toNumber = (...values: unknown[]): number | undefined => {
+    for (const value of values) {
+      if (value == null) continue;
+      const n = Number(value);
+      if (Number.isFinite(n)) return n;
+    }
+    return undefined;
   };
 
-  let totalWeight = 0;
-  let totalScore = 0;
-  for (const key in breakdown) {
-    totalWeight += breakdown[key].weight;
-    totalScore += breakdown[key].weight * breakdown[key].score;
-  }
+  const toText = (...values: unknown[]): string | undefined => {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return undefined;
+  };
 
-  const total = totalWeight > 0 ? totalScore / totalWeight : 0;
+  const hasKnownField = [
+    'vol', 'volatility', 'volatility_ratio',
+    'entry_score', 'buy_score', 'score',
+    'exit_score', 'sell_score',
+  ].some((key) => raw[key] != null);
+  if (!hasKnownField) return undefined;
 
-  return { total, breakdown };
+  const trendRaw = toText(raw.trend);
+  const bbRaw = toText(raw.bb);
+  const trend: SymbolIndicators['trend'] =
+    trendRaw === 'up' || trendRaw === 'down' || trendRaw === 'unknown' ? trendRaw : 'unknown';
+  const bb: SymbolIndicators['bb'] =
+    bbRaw === 'none' || bbRaw === 'below' || bbRaw === 'recovered' ? bbRaw : 'none';
+
+  return {
+    vol: toNumber(raw.vol, raw.volatility, raw.volatility_ratio) ?? 0,
+    trend,
+    bb,
+    rsi: toNumber(raw.rsi) ?? 50,
+    rsi_slope: toNumber(raw.rsi_slope, raw.rsiSlope) ?? 0,
+    adx: toNumber(raw.adx) ?? 25,
+    entry_score: toNumber(raw.entry_score, raw.buy_score, raw.score),
+    entry_threshold_base: toNumber(raw.entry_threshold_base, raw.entry_threshold),
+    entry_threshold_effective: toNumber(raw.entry_threshold_effective, raw.buy_threshold_effective),
+    entry_regime_offset: toNumber(raw.entry_regime_offset),
+    entry_decision: toText(raw.entry_decision, raw.buy_decision) ?? null,
+    entry_block_reason: toText(raw.entry_block_reason, raw.buy_block_reason) ?? null,
+    entry_executable: typeof raw.entry_executable === 'boolean' ? raw.entry_executable : null,
+    exit_score: toNumber(raw.exit_score, raw.sell_score),
+    exit_rsi: toNumber(raw.exit_rsi, raw.sell_rsi),
+    exit_bb: toNumber(raw.exit_bb, raw.sell_bb),
+    exit_profit: toNumber(raw.exit_profit, raw.sell_profit),
+    exit_adx: toNumber(raw.exit_adx, raw.sell_adx),
+    exit_status: toText(raw.exit_status, raw.sell_status),
+    exit_threshold_effective: toNumber(raw.exit_threshold_effective, raw.sell_threshold_effective),
+    exit_decision: toText(raw.exit_decision, raw.sell_decision) ?? null,
+    exit_block_reason: toText(raw.exit_block_reason, raw.sell_block_reason) ?? null,
+  };
 }
 
+function getEntryDecisionLabel(decision: string | null | undefined): { text: string; color: string } {
+  if (decision === 'BUY') return { text: '매수', color: '#389e0d' };
+  if (decision === 'PAUSE') return { text: '일시중지', color: '#fa8c16' };
+  if (decision === 'ERROR') return { text: '오류', color: '#cf1322' };
+  return { text: '대기', color: '#999' };
+}
 
 /* ── 종목 테이블 행 타입 ────────────────────────────────── */
 
@@ -420,30 +446,39 @@ const buildBaseSymbolColumns = (strategyParams: StrategyParams | null): ColumnsT
       const ind = record.indicators;
       if (!ind) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
       
-      const weights = strategyParams ?? DEFAULT_STRATEGY;
-      const { total, breakdown } = calcEntryScore(ind, weights);
-      const threshold = weights.entry_score_threshold ?? 70;
-      
-      const color = total >= threshold ? '#389e0d' : total >= threshold - 15 ? '#fa8c16' : '#cf1322';
-      
+      const score = ind.entry_score;
+      if (score == null) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+
+      const threshold = ind.entry_threshold_effective ?? (strategyParams?.entry_score_threshold ?? 70);
+      const color = score >= threshold ? '#389e0d' : score >= threshold - 15 ? '#fa8c16' : '#cf1322';
+      const decisionLabel = getEntryDecisionLabel(ind.entry_decision);
+      const executableText = ind.entry_executable === true ? '실행 가능' : '실행 불가';
+
       return (
         <Tooltip destroyOnHidden
           title={
             <div style={{ minWidth: 120 }}>
-              {Object.entries(breakdown).map(([name, { weight, score }]) => (
-                <div key={name} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                  <span>{name}:</span>
-                  <span>{Math.round(score)} (×{weight.toFixed(1)})</span>
-                </div>
-              ))}
-              <div style={{ borderTop: '1px solid #444', marginTop: 6, paddingTop: 6, textAlign: 'right' }}>
-                임계치: {threshold.toFixed(1)}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span>판정:</span>
+                <span style={{ color: decisionLabel.color }}>{decisionLabel.text}</span>
               </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span>실행:</span>
+                <span style={{ color: ind.entry_executable ? '#389e0d' : '#cf1322' }}>{executableText}</span>
+              </div>
+              <div style={{ borderTop: '1px solid #444', marginTop: 6, paddingTop: 6, textAlign: 'right' }}>
+                임계치 {threshold.toFixed(1)}
+              </div>
+              {ind.entry_block_reason && (
+                <div style={{ borderTop: '1px solid #444', marginTop: 6, paddingTop: 6, color: '#fa8c16' }}>
+                  {ind.entry_block_reason}
+                </div>
+              )}
             </div>
           }
         >
           <Text style={{ fontSize: 12, color, fontWeight: 600, cursor: 'help' }}>
-            {Math.round(total)}
+            {Math.round(score)}
           </Text>
         </Tooltip>
       );
@@ -490,7 +525,7 @@ const buildBaseSymbolColumns = (strategyParams: StrategyParams | null): ColumnsT
       if (exitScore == null) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
 
       const weights = strategyParams ?? DEFAULT_STRATEGY;
-      const exitThreshold = weights.exit_score_threshold ?? 70;
+      const exitThreshold = ind.exit_threshold_effective ?? (strategyParams?.exit_score_threshold ?? 70);
 
       // 매도 스코어: 높을수록 매도 임박 → 빨강
       const color = exitScore >= exitThreshold ? '#cf1322' : exitScore >= exitThreshold - 15 ? '#fa8c16' : '#389e0d';
@@ -890,8 +925,7 @@ export default function DashboardPage() {
           {botState?.market_regime && REGIME_DISPLAY[botState.market_regime] && (
             <Tooltip
               destroyOnHidden
-              overlayStyle={HEADER_TOOLTIP_STYLE}
-              overlayInnerStyle={HEADER_TOOLTIP_INNER_STYLE}
+              styles={{ root: HEADER_TOOLTIP_STYLE, body: HEADER_TOOLTIP_INNER_STYLE }}
               title={(
                 <div>
                   <div style={{ fontWeight: 600, marginBottom: 6 }}>시장 레짐 (BTC 기준)</div>
@@ -932,8 +966,7 @@ export default function DashboardPage() {
             return badge ? (
               <Tooltip
                 destroyOnHidden
-                overlayStyle={HEADER_TOOLTIP_STYLE}
-                overlayInnerStyle={HEADER_TOOLTIP_INNER_STYLE}
+                styles={{ root: HEADER_TOOLTIP_STYLE, body: HEADER_TOOLTIP_INNER_STYLE }}
                 title={(
                   <div>
                     <div style={{ fontWeight: 600, marginBottom: 6 }}>Kelly 비중</div>

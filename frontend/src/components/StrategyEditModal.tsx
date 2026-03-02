@@ -350,6 +350,10 @@ export default function StrategyEditModal({
                   </Form.Item>
                 </Col>
               </Row>
+              <Text style={{ fontSize: 12, opacity: 0.65, display: 'block', marginTop: 8 }}>
+                기본값 78은 운영 튜닝 기준값입니다. 횡보장에서 과도한 진입을 줄이면서도 유효 신호를 놓치지 않도록 맞춘 값이며,
+                추세장/변동성 폭발 구간에서는 레짐 오프셋이 더해져 실효 임계치가 자동으로 높아집니다.
+              </Text>
             </Form.Item>
           </Col>
         </Row>
@@ -526,7 +530,7 @@ export default function StrategyEditModal({
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
-          message="BTC 기준으로 시장 상태를 판단하여 진입 임계치를 동적으로 조정합니다. 추세장/변동성 폭발 시 임계치를 높여 더 확실한 기회만 포착합니다."
+          title="BTC 기준으로 시장 상태를 판단하여 진입 임계치를 동적으로 조정합니다. 추세장/변동성 폭발 시 임계치를 높여 더 확실한 기회만 포착합니다."
         />
         <Row gutter={16}>
           <Col span={12}>

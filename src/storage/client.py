@@ -6,7 +6,8 @@ Supabase 스토리지 모듈.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from supabase import create_client, Client
@@ -448,6 +449,9 @@ class StorageClient:
                 "positive_factors": data.get("positive_factors", []),
                 "negative_factors": data.get("negative_factors", []),
                 "volume_impact": data.get("volume_impact", False),
+                "verification_horizon_min": data.get("verification_horizon_min"),
+                "baseline_price": data.get("baseline_price"),
+                "pending_reason": data.get("pending_reason"),
             }
             result = self._client.table("sentiment_insights").insert(row).execute()
             logger.info("감성 분석 저장: %s", data.get("title", "")[:50])
@@ -467,6 +471,8 @@ class StorageClient:
                 "keywords": analysis.get("keywords", []),
                 "positive_factors": analysis.get("positive_factors", []),
                 "negative_factors": analysis.get("negative_factors", []),
+                "verification_horizon_min": analysis.get("verification_horizon_min"),
+                "pending_reason": analysis.get("pending_reason"),
             }
             result = self._client.table("sentiment_insights").update(update_data).eq("news_id", news_id).execute()
             logger.info("감성 분석 업데이트: %s", news_id[:16])
@@ -498,3 +504,224 @@ class StorageClient:
             logger.info("sentiment_insights %d일 이전 데이터 정리 완료", days)
         except Exception:
             logger.exception("오래된 감성 분석 데이터 정리 실패")
+
+    # ── 감성 검증 확장 메서드 ─────────────────────────────────
+
+    def get_pending_sentiment_insights(self, limit: int = 200) -> list[dict[str, Any]]:
+        """검증 대기 중인(verification_result IS NULL, decision != 'PENDING') 감성 분석 결과를 조회합니다."""
+        try:
+            result = (
+                self._client.table("sentiment_insights")
+                .select("*")
+                .is_("verification_result", "null")
+                .neq("decision", "PENDING")
+                .order("created_at", desc=False)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception:
+            logger.exception("검증 대기 감성 분석 조회 실패")
+            return []
+
+    def get_sentiment_insights_for_backfill(
+        self,
+        limit: int = 1000,
+        days: int = 30,
+        include_verified: bool = False,
+        news_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """백필 대상 감성 분석 결과를 조회합니다.
+
+        기본값은 미검증(verification_result IS NULL)만 조회합니다.
+        include_verified=True면 이미 검증된 건도 포함해 재계산할 수 있습니다.
+        """
+        try:
+            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+            query = (
+                self._client.table("sentiment_insights")
+                .select("*")
+                .neq("decision", "PENDING")
+                .gte("created_at", cutoff)
+                .order("created_at", desc=False)
+                .limit(limit)
+            )
+            if not include_verified:
+                query = query.is_("verification_result", "null")
+
+            if news_ids:
+                target_news_ids = [str(n).strip() for n in news_ids if str(n).strip()]
+                if target_news_ids:
+                    query = query.in_("news_id", target_news_ids)
+
+            result = query.execute()
+            return result.data or []
+        except Exception:
+            logger.exception("백필 대상 감성 분석 조회 실패")
+            return []
+
+    def finalize_sentiment_verification(
+        self,
+        *,
+        news_id: str,
+        actual_price_change: float,
+        evaluation_price: float,
+        verification_result: str,
+        direction_match: bool | None,
+        baseline_price: float,
+        verification_window_start_at: datetime,
+        verification_window_end_at: datetime,
+        window_open_price: float,
+        window_close_price: float,
+        window_high_price: float,
+        window_low_price: float,
+        window_return_pct: float,
+        window_max_rise_pct: float,
+        window_max_drop_pct: float,
+        verification_explanation: str,
+        analysis_insight: str,
+        evaluated_at: datetime,
+        verification_horizon_min: int | None = None,
+        pending_reason: str | None = None,
+    ) -> bool:
+        """감성 분석 검증 결과를 최종 기록합니다."""
+        try:
+            update_data: dict[str, Any] = {
+                "actual_price_change": round(actual_price_change, 6),
+                "evaluation_price": evaluation_price,
+                "verification_result": verification_result,
+                "direction_match": direction_match,
+                "baseline_price": baseline_price,
+                "verification_window_start_at": verification_window_start_at.isoformat(),
+                "verification_window_end_at": verification_window_end_at.isoformat(),
+                "window_open_price": window_open_price,
+                "window_close_price": window_close_price,
+                "window_high_price": window_high_price,
+                "window_low_price": window_low_price,
+                "window_return_pct": round(window_return_pct, 6),
+                "window_max_rise_pct": round(window_max_rise_pct, 6),
+                "window_max_drop_pct": round(window_max_drop_pct, 6),
+                "verification_explanation": verification_explanation,
+                "analysis_insight": analysis_insight,
+                "evaluated_at": evaluated_at.isoformat(),
+                "pending_reason": pending_reason,
+            }
+            if verification_horizon_min is not None:
+                update_data["verification_horizon_min"] = int(verification_horizon_min)
+            result = (
+                self._client.table("sentiment_insights")
+                .update(update_data)
+                .eq("news_id", news_id)
+                .execute()
+            )
+            return bool(result.data)
+        except Exception:
+            logger.exception("감성 검증 결과 저장 실패: %s", news_id)
+            return False
+
+    def update_sentiment_pending_reason(self, news_id: str, reason: str) -> None:
+        """감성 분석 레코드의 대기 사유를 업데이트합니다."""
+        try:
+            self._client.table("sentiment_insights").update(
+                {"pending_reason": reason}
+            ).eq("news_id", news_id).execute()
+        except Exception:
+            logger.exception("대기 사유 업데이트 실패: %s", news_id)
+
+    def rebuild_sentiment_performance_daily(self, target_date: date) -> None:
+        """특정 날짜의 감성 검증 일일 집계를 재생성합니다."""
+        try:
+            # 해당 날짜의 검증 완료 데이터 조회
+            start = datetime.combine(target_date, datetime.min.time()).isoformat()
+            end = datetime.combine(target_date + timedelta(days=1), datetime.min.time()).isoformat()
+            result = (
+                self._client.table("sentiment_insights")
+                .select("currencies, decision, verification_result, confidence, actual_price_change")
+                .not_.is_("verification_result", "null")
+                .gte("created_at", start)
+                .lt("created_at", end)
+                .execute()
+            )
+            rows = result.data or []
+            if not rows:
+                return
+
+            # (currency, decision) 별 집계
+            stats: dict[tuple[str, str], dict[str, Any]] = defaultdict(lambda: {
+                "total": 0, "verified": 0, "correct": 0, "incorrect": 0,
+                "conf_sum": 0.0, "change_sum": 0.0,
+            })
+
+            for row in rows:
+                decision = str(row.get("decision", "WAIT")).upper()
+                vr = row.get("verification_result")
+                conf = float(row.get("confidence") or 0)
+                change = float(row.get("actual_price_change") or 0)
+                currencies = row.get("currencies") or []
+
+                keys = [("ALL", decision), ("ALL", "ALL")]
+                for cur in currencies:
+                    keys.append((str(cur).upper(), decision))
+                    keys.append((str(cur).upper(), "ALL"))
+
+                for key in keys:
+                    s = stats[key]
+                    s["total"] += 1
+                    if vr == "correct":
+                        s["verified"] += 1
+                        s["conf_sum"] += conf
+                        s["change_sum"] += abs(change)
+                        s["correct"] += 1
+                    elif vr == "incorrect":
+                        s["verified"] += 1
+                        s["conf_sum"] += conf
+                        s["change_sum"] += abs(change)
+                        s["incorrect"] += 1
+
+            # 기존 해당 날짜 집계 삭제 후 재삽입
+            self._client.table("sentiment_performance_daily").delete().eq(
+                "stats_date", target_date.isoformat()
+            ).execute()
+
+            insert_rows = []
+            for (currency, decision), s in stats.items():
+                insert_rows.append({
+                    "stats_date": target_date.isoformat(),
+                    "currency": currency,
+                    "decision": decision,
+                    "total_count": s["total"],
+                    "verified_count": s["verified"],
+                    "correct_count": s["correct"],
+                    "incorrect_count": s["incorrect"],
+                    "avg_confidence": round(s["conf_sum"] / s["verified"], 2) if s["verified"] > 0 else None,
+                    "avg_actual_change": round(s["change_sum"] / s["verified"], 6) if s["verified"] > 0 else None,
+                })
+
+            if insert_rows:
+                try:
+                    self._client.table("sentiment_performance_daily").insert(insert_rows).execute()
+                except Exception as e:
+                    # 구버전 스키마( avg_actual_change 컬럼 없음 ) 호환 폴백
+                    if "avg_actual_change" not in str(e):
+                        raise
+                    legacy_rows = [
+                        {k: v for k, v in row.items() if k != "avg_actual_change"}
+                        for row in insert_rows
+                    ]
+                    try:
+                        self._client.table("sentiment_performance_daily").insert(legacy_rows).execute()
+                        logger.warning(
+                            "sentiment_performance_daily에 avg_actual_change 컬럼이 없어 레거시 포맷으로 저장했습니다."
+                        )
+                    except Exception as legacy_e:
+                        if "Could not find the" in str(legacy_e):
+                            logger.warning(
+                                "sentiment_performance_daily 스키마가 더 오래되어 집계 저장을 건너뜁니다: %s",
+                                legacy_e,
+                            )
+                            return
+                        raise
+                logger.info("감성 검증 일일 집계 재생성 완료: %s (%d행)", target_date, len(insert_rows))
+
+        except Exception:
+            logger.exception("감성 검증 일일 집계 재생성 실패: %s", target_date)

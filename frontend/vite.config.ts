@@ -15,6 +15,16 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/kakao-api/, ''),
       },
+      '/binance-api': {
+        target: 'https://api.binance.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/binance-api/, ''),
+      },
+      '/upbit-api': {
+        target: 'https://api.upbit.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/upbit-api/, ''),
+      },
     },
   },
   build: {
@@ -42,6 +52,16 @@ export default defineConfig({
         target: 'https://kapi.kakao.com',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/kakao-api/, ''),
+      },
+      '/binance-api': {
+        target: 'https://api.binance.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/binance-api/, ''),
+      },
+      '/upbit-api': {
+        target: 'https://api.upbit.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/upbit-api/, ''),
       },
     },
   },

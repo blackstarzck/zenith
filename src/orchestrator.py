@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from src.config import AppConfig, StrategyParams
 from src.collector.data_collector import UpbitCollector
@@ -22,6 +22,15 @@ from src.report.generator import generate_daily_report
 from src.strategy.regime import classify_regime, MarketRegime
 from src.collector.news_collector import NewsCollector
 from src.strategy.sentiment import SentimentAnalyzer
+from src.strategy.sentiment_verifier import (
+    select_symbol,
+    parse_iso_datetime,
+    get_price_near,
+    get_window_metrics,
+    evaluate_decision,
+    build_verification_explanation,
+    build_analysis_insight,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +40,8 @@ _SNAPSHOT_INTERVAL = 18
 # 전략 파라미터 핫리로드 간격 (틱 수 기준, 10초 루프 × 6 = 약 1분)
 _PARAM_RELOAD_INTERVAL = 6
 
+# 감성 분석 사후 검증 배치 크기 (틱당 최대 처리 건수)
+_SENTIMENT_VERIFY_BATCH = 200
 
 class Orchestrator:
     """트레이딩 봇 오케스트레이터.
@@ -244,6 +255,9 @@ class Orchestrator:
         if self._sentiment_enabled and self._loop_count % self._config.sentiment.poll_interval_ticks == 0:
             self._run_sentiment_cycle()
 
+        # 4-4. 감성 분석 사후 검증 (약 5분 간격, 감성 분석 직후)
+        if self._sentiment_enabled and self._loop_count % self._config.sentiment.poll_interval_ticks == 0:
+            self._verify_pending_sentiments()
         # 5. 일일 리포트 (매일 08:00 1회 발송)
         if not self._daily_report_sent and datetime.now().hour >= 8:
             self._send_daily_report()
@@ -407,29 +421,63 @@ class Orchestrator:
                     "adx": round(snapshot.adx, 1),
                 }
 
-                # 체결 실패 쿨다운 확인
-                if self._executor.is_on_cooldown(symbol):
-                    time.sleep(0.2)
-                    continue
+                # ── 스코어 계산 (예외 격리) ──
+                try:
+                    # 진입 스코어 평가 (쿨다운/리스크 체크 전에 수행 — 지표로 항상 노출)
+                    signal = self._strategy.evaluate_entry(
+                        symbol, snapshot, closes,
+                        threshold_offset=regime_offset,
+                        regime=self._current_regime,
+                    )
 
-                can_enter, reason = self._risk.can_enter(symbol, current_balance)
-                if not can_enter:
-                    time.sleep(0.2)
-                    continue
+                    entry_threshold_base = self._config.strategy.entry_score_threshold
+                    entry_threshold_effective = min(entry_threshold_base + regime_offset, 99)
+                    entry_score = round(signal.score, 1) if signal.score is not None else None
+                    entry_decision = "BUY" if signal.signal == Signal.BUY else (
+                        "PAUSE" if signal.signal == Signal.MARKET_PAUSE else "HOLD"
+                    )
 
-                signal = self._strategy.evaluate_entry(
-                    symbol, snapshot, closes,
-                    threshold_offset=regime_offset,
-                    regime=self._current_regime,
-                )
+                    # 진입 게이트 체크: 쿨다운 / 리스크
+                    global_entry_block_reason: str | None = None
+                    if self._executor.is_on_cooldown(symbol):
+                        global_entry_block_reason = "쿨다운"
+                    else:
+                        can_enter, reason = self._risk.can_enter(symbol, current_balance)
+                        if not can_enter:
+                            global_entry_block_reason = reason or "리스크 차단"
 
-                if signal.signal == Signal.BUY:
-                    self._execute_buy(symbol, signal, current_balance)
-                elif signal.signal == Signal.MARKET_PAUSE:
-                    logger.info("[%s] %s", symbol, signal.reason)
+                    entry_executable = (
+                        signal.signal == Signal.BUY and global_entry_block_reason is None
+                    )
+
+                    # 진입 지표에 스코어 정보 추가
+                    symbol_indicators[symbol].update({
+                        "entry_score": entry_score,
+                        "entry_threshold_base": entry_threshold_base,
+                        "entry_threshold_effective": entry_threshold_effective,
+                        "entry_regime_offset": regime_offset,
+                        "entry_decision": entry_decision,
+                        "entry_block_reason": global_entry_block_reason or signal.reason,
+                        "entry_executable": entry_executable,
+                    })
+
+                    # 실제 매수 실행
+                    if entry_executable:
+                        self._execute_buy(symbol, signal, current_balance)
+                    elif signal.signal == Signal.MARKET_PAUSE:
+                        logger.info("[%s] %s", symbol, signal.reason)
+
+                except Exception as e:
+                    logger.warning("스코어 계산/게이트 체크 실패 [%s]: %s", symbol, e)
+                    # 스코어 계산 실패 시에도 기본 폴백값 제공 (프론트엔드에서 "-" 대신 상태 표시)
+                    symbol_indicators[symbol].update({
+                        "entry_score": None,
+                        "entry_decision": "ERROR",
+                        "entry_block_reason": f"스코어 계산 오류: {str(e)[:50]}",
+                        "entry_executable": False,
+                    })
 
                 time.sleep(0.2)
-
             except ValueError as e:
                 logger.debug("진입 평가 건너뜀 [%s]: %s", symbol, e)
             except Exception as e:
@@ -437,9 +485,18 @@ class Orchestrator:
 
         # Phase 2: 매도 스코어 병합 (exit scores → symbol_indicators)
         positions = self._risk.get_all_positions()
+        exit_threshold_effective = self._config.strategy.exit_score_threshold
         for sym, exit_data in self._exit_scores.items():
             if sym not in positions:
                 continue  # 이미 매도된 종목의 stale 데이터 무시
+            # 매도 임계치/판정 추가
+            es = exit_data.get("exit_score")
+            exit_decision = "SELL" if (es is not None and es >= exit_threshold_effective) else "HOLD"
+            if exit_data.get("exit_status") == "trailing":
+                exit_decision = "TRAILING"
+            exit_data["exit_threshold_effective"] = exit_threshold_effective
+            exit_data["exit_decision"] = exit_decision
+            exit_data["exit_block_reason"] = None
             if sym in symbol_indicators:
                 symbol_indicators[sym].update(exit_data)
             else:
@@ -450,7 +507,6 @@ class Orchestrator:
         # 지표 데이터를 bot_state에 저장
         if symbol_indicators:
             self._storage.upsert_bot_state(symbol_volatilities=symbol_indicators)
-
     # ── 가격 스냅샷 저장 ─────────────────────────────────────
 
     def _save_price_snapshots(self) -> None:
@@ -1013,6 +1069,110 @@ class Orchestrator:
 
         except Exception:
             logger.warning("감성 분석 사이클 실패 — 다음 주기에 재시도")
+
+    def _verify_pending_sentiments(self) -> None:
+        """완료 대기 중인 감성 분석 건의 사후 검증을 수행합니다."""
+        try:
+            rows = self._storage.get_pending_sentiment_insights(_SENTIMENT_VERIFY_BATCH)
+            if not rows:
+                return
+
+            now_utc = datetime.now(timezone.utc)
+            hold_threshold = abs(self._config.sentiment.hold_neutral_threshold_pct)
+            affected_dates: set[date] = set()
+            verified = 0
+
+            for row in rows:
+                try:
+                    news_id = str(row.get("news_id") or "")
+                    if not news_id:
+                        continue
+
+                    created_at = parse_iso_datetime(row.get("created_at"))
+                    if not created_at:
+                        self._storage.update_sentiment_pending_reason(news_id, "생성 시각 파싱 실패")
+                        continue
+
+                    horizon = int(row.get("verification_horizon_min") or self._config.sentiment.verification_horizon_minutes)
+                    due_at = created_at + timedelta(minutes=max(horizon, 1))
+                    if due_at > now_utc:
+                        continue
+
+                    decision = str(row.get("decision") or "WAIT").upper()
+                    symbol = select_symbol(row.get("currencies") or [])
+                    if not symbol:
+                        self._storage.update_sentiment_pending_reason(news_id, "검증 심볼 없음")
+                        continue
+
+                    baseline = row.get("baseline_price")
+                    if baseline is None or float(baseline) <= 0:
+                        baseline = get_price_near(symbol, created_at)
+                        time.sleep(0.12)
+                    if baseline is None or float(baseline) <= 0:
+                        self._storage.update_sentiment_pending_reason(news_id, "기준가 조회 실패")
+                        continue
+
+                    metrics = get_window_metrics(symbol, created_at, due_at)
+                    time.sleep(0.12)
+                    if metrics is None:
+                        self._storage.update_sentiment_pending_reason(news_id, "검증 구간 가격 데이터 부족")
+                        continue
+
+                    change_pct = ((metrics.close_price / float(baseline)) - 1.0) * 100.0
+                    verification_result, direction_match = evaluate_decision(
+                        decision=decision,
+                        change_pct=change_pct,
+                        hold_threshold_pct=hold_threshold,
+                        directional_neutral_band_pct=self._config.sentiment.directional_neutral_band_pct,
+                    )
+                    explanation = build_verification_explanation(metrics)
+                    insight = build_analysis_insight(
+                        decision=decision,
+                        confidence=row.get("confidence"),
+                        metrics=metrics,
+                        verification_result=verification_result,
+                    )
+
+                    ok = self._storage.finalize_sentiment_verification(
+                        news_id=news_id,
+                        actual_price_change=change_pct,
+                        evaluation_price=metrics.close_price,
+                        verification_result=verification_result,
+                        direction_match=direction_match,
+                        baseline_price=float(baseline),
+                        verification_window_start_at=metrics.window_start_at,
+                        verification_window_end_at=metrics.window_end_at,
+                        window_open_price=metrics.open_price,
+                        window_close_price=metrics.close_price,
+                        window_high_price=metrics.high_price,
+                        window_low_price=metrics.low_price,
+                        window_return_pct=metrics.return_pct,
+                        window_max_rise_pct=metrics.max_rise_pct,
+                        window_max_drop_pct=metrics.max_drop_pct,
+                        verification_explanation=explanation,
+                        analysis_insight=insight,
+                        evaluated_at=now_utc,
+                        pending_reason=None,
+                    )
+                    if ok:
+                        verified += 1
+                        affected_dates.add(created_at.date())
+
+                except Exception as e:
+                    logger.error("감성 검증 실패 [%s]: %s", row.get("news_id", "?"), e)
+
+            # 영향 받은 날짜별 일일 성과 집계 재생성
+            for target_date in sorted(affected_dates):
+                try:
+                    self._storage.rebuild_sentiment_performance_daily(target_date)
+                except Exception as e:
+                    logger.error("감성 성과 집계 재생성 실패 [%s]: %s", target_date, e)
+
+            if verified:
+                logger.info("[감성 검증] %d건 검증 완료, 영향 날짜 %d일", verified, len(affected_dates))
+
+        except Exception:
+            logger.warning("감성 사후 검증 실패 — 다음 주기에 재시도")
 
     def _send_daily_report(self) -> None:
         """일일 리포트를 전송합니다."""

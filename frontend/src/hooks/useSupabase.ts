@@ -1,6 +1,19 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Trade, DailyStat, SystemLog, BotState, PriceSnapshot, BalanceSnapshot, HeldPosition, DailyReport, SentimentInsight } from '../types/database';
+import type {
+  Trade,
+  DailyStat,
+  SystemLog,
+  BotState,
+  PriceSnapshot,
+  BalanceSnapshot,
+  HeldPosition,
+  DailyReport,
+  SentimentInsight,
+  SentimentPerformanceDaily,
+  DislocationPaperTrade,
+  DislocationPaperMetric,
+} from '../types/database';
 import dayjs from 'dayjs';
 import { useRecoveryTick } from './useRecoverySignal';
 
@@ -220,6 +233,48 @@ export function usePriceSnapshots(symbol: string | null, limit = 120) {
       supabase.removeChannel(channel);
     };
   }, [fetch, symbol, limit, recoveryTick]);
+
+  return { snapshots, loading, refetch: fetch };
+}
+
+/**
+ * 특정 구간의 가격 스냅샷을 조회합니다.
+ * 감성 검증 상세의 코인 차트 렌더링 용도입니다.
+ */
+export function usePriceSnapshotsRange(
+  symbol: string | null,
+  startAt: string | null,
+  endAt: string | null,
+  limit = 600,
+) {
+  const [snapshots, setSnapshots] = useState<PriceSnapshot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
+
+  const fetch = useCallback(async () => {
+    if (!symbol || !startAt || !endAt) {
+      setSnapshots([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    const { data } = await supabase
+      .from('price_snapshots')
+      .select('*')
+      .eq('symbol', symbol)
+      .gte('created_at', startAt)
+      .lte('created_at', endAt)
+      .order('created_at', { ascending: true })
+      .limit(limit);
+
+    setSnapshots((data as PriceSnapshot[]) ?? []);
+    setLoading(false);
+  }, [symbol, startAt, endAt, limit]);
+
+  useEffect(() => {
+    fetch();
+  }, [fetch, recoveryTick]);
 
   return { snapshots, loading, refetch: fetch };
 }
@@ -609,4 +664,131 @@ export function useSentimentInsights(limit = 30) {
   }, [fetch, limit, recoveryTick]);
 
   return { insights, loading, refetch: fetch };
+}
+
+/* ── Sentiment Performance Daily (감성 검증 일일 집계) ──────────────── */
+
+export function useSentimentPerformanceDaily(days = 30, currency: string | null = null) {
+  const [items, setItems] = useState<SentimentPerformanceDaily[]>([]);
+  const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    let query = supabase
+      .from('sentiment_performance_daily')
+      .select('*')
+      .order('stats_date', { ascending: true });
+    if (days < 9999) {
+      const since = dayjs().subtract(days, 'day').format('YYYY-MM-DD');
+      query = query.gte('stats_date', since);
+    }
+    if (currency) {
+      query = query.eq('currency', currency);
+    }
+    const { data } = await query;
+    setItems((data as SentimentPerformanceDaily[]) ?? []);
+    setLoading(false);
+  }, [days, currency]);
+
+  useEffect(() => {
+    fetch();
+
+    const channel = supabase
+      .channel(`sentiment-performance-${++_chId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'sentiment_performance_daily' },
+        () => {
+          fetch();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetch, recoveryTick]);
+
+  return { items, loading, refetch: fetch };
+}
+
+/* ── Dislocation Paper Trades (괴리 모의매매 체결 로그) ──────────────── */
+
+export function useDislocationPaperTrades(limit = 300) {
+  const [items, setItems] = useState<DislocationPaperTrade[]>([]);
+  const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('dislocation_paper_trades')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    setItems((data as DislocationPaperTrade[]) ?? []);
+    setLoading(false);
+  }, [limit]);
+
+  useEffect(() => {
+    fetch();
+
+    const channel = supabase
+      .channel(`dislocation-paper-trades-${++_chId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'dislocation_paper_trades' },
+        (payload) => {
+          setItems((prev) => [payload.new as DislocationPaperTrade, ...prev].slice(0, limit));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetch, limit, recoveryTick]);
+
+  return { items, loading, refetch: fetch };
+}
+
+/* ── Dislocation Paper Metrics (괴리 모의매매 분석 지표) ──────────────── */
+
+export function useDislocationPaperMetrics(limit = 1000) {
+  const [items, setItems] = useState<DislocationPaperMetric[]>([]);
+  const [loading, setLoading] = useState(true);
+  const recoveryTick = useRecoveryTick();
+
+  const fetch = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('dislocation_paper_metrics')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    setItems((data as DislocationPaperMetric[]) ?? []);
+    setLoading(false);
+  }, [limit]);
+
+  useEffect(() => {
+    fetch();
+
+    const channel = supabase
+      .channel(`dislocation-paper-metrics-${++_chId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'dislocation_paper_metrics' },
+        (payload) => {
+          setItems((prev) => [payload.new as DislocationPaperMetric, ...prev].slice(0, limit));
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetch, limit, recoveryTick]);
+
+  return { items, loading, refetch: fetch };
 }

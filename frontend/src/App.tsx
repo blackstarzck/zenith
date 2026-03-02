@@ -14,6 +14,8 @@ const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 const GuidePage = lazy(() => import('./pages/GuidePage'));
+const SentimentImpactPage = lazy(() => import('./pages/SentimentImpactPage'));
+const DislocationPaperPage = lazy(() => import('./pages/DislocationPaperPage'));
 
 /* ── Auth Guard ─────────────────────────────────────────── */
 
@@ -70,6 +72,8 @@ export default function App() {
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="guide" element={<GuidePage />} />
+                <Route path="sentiment-impact" element={<SentimentImpactPage />} />
+                <Route path="dislocation-paper" element={<DislocationPaperPage />} />
               </Route>
 
               {/* Fallback */}

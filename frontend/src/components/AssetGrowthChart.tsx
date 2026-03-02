@@ -26,6 +26,9 @@ interface Props {
   data: AssetDataPoint[];
   height?: number;
   chartRange?: ChartRange;
+  highlightStartAt?: string;
+  highlightEndAt?: string;
+  pinOneHourToNow?: boolean;
 }
 
 /* ── Helpers ───────────────────────────────────────────── */
@@ -83,11 +86,19 @@ function formatTooltipDate(time: number, range: ChartRange): string {
 
 /* ── Component ─────────────────────────────────────────── */
 
-export default memo(function AssetGrowthChart({ data, height = 340, chartRange = 30 }: Props) {
+export default memo(function AssetGrowthChart({
+  data,
+  height = 340,
+  chartRange = 30,
+  highlightStartAt,
+  highlightEndAt,
+  pinOneHourToNow = true,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Area'> | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
 
   /* ── Create chart ──────────────────────────────────────── */
   const initChart = useCallback(() => {
@@ -205,17 +216,49 @@ export default memo(function AssetGrowthChart({ data, height = 340, chartRange =
     seriesRef.current = series;
   }, [height, chartRange]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const updateHighlightOverlay = useCallback(() => {
+    const highlight = highlightRef.current;
+    const chart = chartRef.current;
+    if (!highlight || !chart || !highlightStartAt || !highlightEndAt) {
+      if (highlight) highlight.style.display = 'none';
+      return;
+    }
+
+    const ts = chart.timeScale();
+    const startX = ts.timeToCoordinate(toChartTime(highlightStartAt));
+    const endX = ts.timeToCoordinate(toChartTime(highlightEndAt));
+
+    if (startX == null || endX == null) {
+      highlight.style.display = 'none';
+      return;
+    }
+
+    const left = Math.max(0, Math.min(startX, endX));
+    const width = Math.max(2, Math.abs(endX - startX));
+    highlight.style.left = `${left}px`;
+    highlight.style.width = `${width}px`;
+    highlight.style.display = 'block';
+  }, [highlightStartAt, highlightEndAt]);
+
   /* ── Init / cleanup ──────────────────────────────────── */
   useEffect(() => {
     initChart();
+    const chart = chartRef.current;
+    const ts = chart?.timeScale();
+    if (ts) {
+      ts.subscribeVisibleTimeRangeChange(updateHighlightOverlay);
+    }
     return () => {
+      if (ts) {
+        ts.unsubscribeVisibleTimeRangeChange(updateHighlightOverlay);
+      }
       if (chartRef.current) {
         chartRef.current.remove();
         chartRef.current = null;
         seriesRef.current = null;
       }
     };
-  }, [initChart]);
+  }, [initChart, updateHighlightOverlay]);
 
   /* ── Update data ─────────────────────────────────────── */
   useEffect(() => {
@@ -230,7 +273,7 @@ export default memo(function AssetGrowthChart({ data, height = 340, chartRange =
     const timeScale = chartRef.current?.timeScale();
 
     // 1시간 뷰: 고정 범위 설정하여 정기적인 시간 tick 표시
-    if (chartRange === '1h' && data.length > 0) {
+    if (pinOneHourToNow && chartRange === '1h' && data.length > 0) {
       const now = dayjs();
       const oneHourAgo = now.subtract(1, 'hour');
       timeScale?.setVisibleRange({
@@ -240,10 +283,26 @@ export default memo(function AssetGrowthChart({ data, height = 340, chartRange =
     } else {
       timeScale?.fitContent();
     }
-  }, [data, chartRange]);
+    updateHighlightOverlay();
+  }, [data, chartRange, pinOneHourToNow, updateHighlightOverlay]);
 
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
+      <div
+        ref={highlightRef}
+        style={{
+          display: 'none',
+          position: 'absolute',
+          zIndex: 2,
+          pointerEvents: 'none',
+          top: 8,
+          bottom: 24,
+          background: 'rgba(250, 173, 20, 0.12)',
+          borderLeft: '1px dashed rgba(250, 173, 20, 0.85)',
+          borderRight: '1px dashed rgba(250, 173, 20, 0.85)',
+          borderRadius: 4,
+        }}
+      />
       <div
         ref={tooltipRef}
         style={{

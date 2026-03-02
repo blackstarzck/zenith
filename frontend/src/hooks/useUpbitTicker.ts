@@ -20,6 +20,8 @@ export interface TickerData {
   change_price: number;
   /** 전일 대비 구분: RISE | EVEN | FALL */
   change: 'RISE' | 'EVEN' | 'FALL';
+  /** 24시간 누적 거래대금 (KRW) */
+  acc_trade_price_24h: number;
   /** 수신 시각 (ms) */
   timestamp: number;
 }
@@ -119,6 +121,7 @@ export function useUpbitTicker(symbols: string[]) {
           change_rate: data.signed_change_rate * 100,
           change_price: data.signed_change_price,
           change: data.change,
+          acc_trade_price_24h: data.acc_trade_price_24h ?? 0,
           timestamp: data.timestamp,
         };
 
