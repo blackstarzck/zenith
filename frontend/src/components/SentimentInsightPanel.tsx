@@ -187,81 +187,98 @@ export default function SentimentInsightPanel({ insights, loading }: SentimentIn
                 </>
               )}
 
-              {/* 상세 (Collapse) */}
-              {isExpanded && (
-                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #303030' }} onClick={(e) => e.stopPropagation()}>
-                  {/* AI 추론 과정 */}
-                  {insight.reasoning_chain && (
-                    <div style={{ marginBottom: 12 }}>
-                      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>AI 추론 과정</Text>
-                      <div style={{ background: '#1a1a1a', padding: 8, borderRadius: 6, fontSize: 12, color: '#ccc', lineHeight: 1.5 }}>
-                        {insight.reasoning_chain}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 긍정/부정 요인 2분할 */}
-                  <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                    <div style={{ flex: 1, background: 'rgba(82, 196, 26, 0.1)', padding: 8, borderRadius: 6, border: '1px solid rgba(82, 196, 26, 0.2)' }}>
-                      <Text style={{ color: COLOR_BULLISH, fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 4 }}>긍정 요인</Text>
-                      <ul style={{ margin: 0, paddingLeft: 16, color: '#e0e0e0', fontSize: 11 }}>
-                        {insight.positive_factors.length > 0 ? (
-                          insight.positive_factors.map((f, i) => <li key={i}>{f}</li>)
-                        ) : (
-                          <li style={{ color: '#666', listStyle: 'none', marginLeft: -16 }}>없음</li>
-                        )}
-                      </ul>
-                    </div>
-                    <div style={{ flex: 1, background: 'rgba(255, 77, 79, 0.1)', padding: 8, borderRadius: 6, border: '1px solid rgba(255, 77, 79, 0.2)' }}>
-                      <Text style={{ color: COLOR_BEARISH, fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 4 }}>부정 요인</Text>
-                      <ul style={{ margin: 0, paddingLeft: 16, color: '#e0e0e0', fontSize: 11 }}>
-                        {insight.negative_factors.length > 0 ? (
-                          insight.negative_factors.map((f, i) => <li key={i}>{f}</li>)
-                        ) : (
-                          <li style={{ color: '#666', listStyle: 'none', marginLeft: -16 }}>없음</li>
-                        )}
-                      </ul>
-                    </div>
-                  </div>
-
-                  {/* 신뢰도 + 검증 결과 */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, background: '#1a1a1a', padding: '8px 12px', borderRadius: 6 }}>
-                    <div>
-                      <Text type="secondary" style={{ fontSize: 11, marginRight: 8 }}>신뢰도</Text>
-                      <Text style={{ color: '#e0e0e0', fontSize: 12, fontWeight: 600 }}>{insight.confidence}%</Text>
-                    </div>
-                    {insight.verification_result && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <Text type="secondary" style={{ fontSize: 11 }}>검증:</Text>
-                        {insight.verification_result === 'correct' ? (
-                          <Tag icon={<CheckCircleOutlined />} color="success" style={{ margin: 0, border: 'none' }}>적중</Tag>
-                        ) : (
-                          <Tag icon={<CloseCircleOutlined />} color="error" style={{ margin: 0, border: 'none' }}>실패</Tag>
-                        )}
-                        {insight.actual_price_change !== null && (
-                          <Text style={{ fontSize: 11, color: insight.actual_price_change > 0 ? COLOR_BULLISH : COLOR_BEARISH }}>
-                            ({insight.actual_price_change > 0 ? '+' : ''}{insight.actual_price_change.toFixed(2)}%)
-                          </Text>
-                        )}
+              {/* 상세 (Collapse) — 애니메이션 */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateRows: isExpanded ? '1fr' : '0fr',
+                  transition: 'grid-template-rows 0.3s ease',
+                }}
+              >
+                <div style={{ overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      marginTop: 12,
+                      paddingTop: 12,
+                      borderTop: '1px solid #303030',
+                      opacity: isExpanded ? 1 : 0,
+                      transition: 'opacity 0.25s ease',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* AI 추론 과정 */}
+                    {insight.reasoning_chain && (
+                      <div style={{ marginBottom: 12 }}>
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>AI 추론 과정</Text>
+                        <div style={{ background: '#1a1a1a', padding: 8, borderRadius: 6, fontSize: 12, color: '#ccc', lineHeight: 1.5 }}>
+                          {insight.reasoning_chain}
+                        </div>
                       </div>
                     )}
-                  </div>
 
-                  {/* 카드 하단: 코인 태그 + 원문 링크 */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Space size={4}>
-                      {insight.currencies.map((c) => (
-                        <Tag key={c} color="blue" style={{ margin: 0, border: 'none' }}>{c}</Tag>
-                      ))}
-                    </Space>
-                    {insight.url && (
-                      <a href={insight.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#1890ff', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        원문 보기 <LinkOutlined />
-                      </a>
-                    )}
+                    {/* 긍정/부정 요인 2분할 */}
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                      <div style={{ flex: 1, background: 'rgba(82, 196, 26, 0.1)', padding: 8, borderRadius: 6, border: '1px solid rgba(82, 196, 26, 0.2)' }}>
+                        <Text style={{ color: COLOR_BULLISH, fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 4 }}>긍정 요인</Text>
+                        <ul style={{ margin: 0, paddingLeft: 16, color: '#e0e0e0', fontSize: 11 }}>
+                          {insight.positive_factors.length > 0 ? (
+                            insight.positive_factors.map((f, i) => <li key={i}>{f}</li>)
+                          ) : (
+                            <li style={{ color: '#666', listStyle: 'none', marginLeft: -16 }}>없음</li>
+                          )}
+                        </ul>
+                      </div>
+                      <div style={{ flex: 1, background: 'rgba(255, 77, 79, 0.1)', padding: 8, borderRadius: 6, border: '1px solid rgba(255, 77, 79, 0.2)' }}>
+                        <Text style={{ color: COLOR_BEARISH, fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 4 }}>부정 요인</Text>
+                        <ul style={{ margin: 0, paddingLeft: 16, color: '#e0e0e0', fontSize: 11 }}>
+                          {insight.negative_factors.length > 0 ? (
+                            insight.negative_factors.map((f, i) => <li key={i}>{f}</li>)
+                          ) : (
+                            <li style={{ color: '#666', listStyle: 'none', marginLeft: -16 }}>없음</li>
+                          )}
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* 신뢰도 + 검증 결과 */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, background: '#1a1a1a', padding: '8px 12px', borderRadius: 6 }}>
+                      <div>
+                        <Text type="secondary" style={{ fontSize: 11, marginRight: 8 }}>신뢰도</Text>
+                        <Text style={{ color: '#e0e0e0', fontSize: 12, fontWeight: 600 }}>{insight.confidence}%</Text>
+                      </div>
+                      {insight.verification_result && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>검증:</Text>
+                          {insight.verification_result === 'correct' ? (
+                            <Tag icon={<CheckCircleOutlined />} color="success" style={{ margin: 0, border: 'none' }}>적중</Tag>
+                          ) : (
+                            <Tag icon={<CloseCircleOutlined />} color="error" style={{ margin: 0, border: 'none' }}>실패</Tag>
+                          )}
+                          {insight.actual_price_change !== null && (
+                            <Text style={{ fontSize: 11, color: insight.actual_price_change > 0 ? COLOR_BULLISH : COLOR_BEARISH }}>
+                              ({insight.actual_price_change > 0 ? '+' : ''}{insight.actual_price_change.toFixed(2)}%)
+                            </Text>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 카드 하단: 코인 태그 + 원문 링크 */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Space size={4}>
+                        {insight.currencies.map((c) => (
+                          <Tag key={c} color="blue" style={{ margin: 0, border: 'none' }}>{c}</Tag>
+                        ))}
+                      </Space>
+                      {insight.url && (
+                        <a href={insight.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#1890ff', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          원문 보기 <LinkOutlined />
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </div>
-              )}
+              </div>
             </Card>
           );
         })}
