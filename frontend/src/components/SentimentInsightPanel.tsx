@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Card, Tag, Typography, Space, Empty, Spin } from 'antd';
-import { LinkOutlined, CheckCircleOutlined, CloseCircleOutlined, RiseOutlined, FallOutlined, PauseCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { LinkOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/ko';
@@ -28,12 +28,6 @@ const DECISION_COLORS: Record<string, string> = {
   PENDING: '#1890ff',
 };
 
-const DECISION_ICONS: Record<string, React.ReactNode> = {
-  BUY: <RiseOutlined />,
-  SELL: <FallOutlined />,
-  HOLD: <PauseCircleOutlined />,
-  WAIT: <ClockCircleOutlined />,
-};
 
 const DECISION_LABELS: Record<string, string> = {
   BUY: '매수',
@@ -152,9 +146,14 @@ export default function SentimentInsightPanel({ insights, loading }: SentimentIn
                   </Paragraph>
                 </div>
                 <Tag
-                  color={DECISION_COLORS[insight.decision] || '#8c8c8c'}
-                  style={{ margin: 0, fontWeight: 600, border: 'none' }}
-                  icon={insight.decision === 'PENDING' ? <Spin size="small" style={{ marginRight: 4 }} /> : DECISION_ICONS[insight.decision]}
+                  style={{
+                    margin: 0,
+                    fontWeight: 600,
+                    border: 'none',
+                    backgroundColor: DECISION_COLORS[insight.decision] || '#8c8c8c',
+                    color: '#fff',
+                  }}
+                  icon={insight.decision === 'PENDING' ? <Spin size="small" style={{ marginRight: 4 }} /> : undefined}
                 >
                   {DECISION_LABELS[insight.decision] || insight.decision}
                 </Tag>
