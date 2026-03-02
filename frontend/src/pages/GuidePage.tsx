@@ -1,13 +1,28 @@
 import { useState, useMemo } from 'react';
-import { Typography, Flex, Collapse, Table, Alert, Card, Row, Col, InputNumber, Select, Divider, Tag } from 'antd';
-import { BookOutlined } from '@ant-design/icons';
-import { GUIDE_SECTIONS } from '../lib/guideContent';
+import { Typography, Flex, Collapse, Table, Alert, Card, Row, Col, InputNumber, Select, Divider, Tag, Input, Empty } from 'antd';
+import { BookOutlined, SearchOutlined } from '@ant-design/icons';
+import { GUIDE_SECTIONS, GUIDE_GLOSSARY } from '../lib/guideContent';
 import { GUIDE_DIAGRAMS } from '../lib/guideDiagrams';
 import MermaidDiagram from '../components/MermaidDiagram';
 
 const { Title, Text, Paragraph } = Typography;
 
 export default function GuidePage() {
+  // ── 용어 사전 검색 상태 ─────────────────────────────────────────────
+  const [glossaryQuery, setGlossaryQuery] = useState('');
+
+  const filteredGlossary = useMemo(() => {
+    const q = glossaryQuery.trim().toLowerCase();
+    if (!q) {
+      return GUIDE_GLOSSARY;
+    }
+    return GUIDE_GLOSSARY.filter((item) =>
+      item.term.toLowerCase().includes(q) ||
+      item.simple.toLowerCase().includes(q) ||
+      item.detail.toLowerCase().includes(q),
+    );
+  }, [glossaryQuery]);
+
   // ── 스코어 시뮬레이터 상태 ─────────────────────────────────────────
   const [simInputs, setSimInputs] = useState({
     volRatio: 1.2,
@@ -283,13 +298,63 @@ export default function GuidePage() {
   });
 
   return (
-    <div style={{ padding: 24, maxWidth: 960, margin: '0 auto' }}>
+    <div style={{ padding: 24, maxWidth: 1280, margin: '0 auto' }}>
       <Flex align="center" gap={8} style={{ marginBottom: 16 }}>
         <BookOutlined />
         <Title level={4} style={{ margin: 0 }}>사용법 가이드</Title>
       </Flex>
 
-      <Collapse defaultActiveKey={['overview']} items={collapseItems} />
+      <Row gutter={[16, 16]} align="top">
+        <Col xs={24} lg={16}>
+          <Alert
+            type="success"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="처음 보시는 분은 오른쪽 용어 사전부터 읽고, 이후에 각 전략 섹션을 보시면 훨씬 이해가 쉽습니다."
+          />
+          <Collapse defaultActiveKey={['overview']} items={collapseItems} />
+        </Col>
+
+        <Col xs={24} lg={8}>
+          <div style={{ position: 'sticky', top: 24 }}>
+            <Card
+              size="small"
+              title="용어 사전 (쉽게 보기)"
+              extra={
+                <Input
+                  allowClear
+                  placeholder="용어 검색 (예: RSI, ATR, 레짐)"
+                  prefix={<SearchOutlined />}
+                  value={glossaryQuery}
+                  onChange={(e) => setGlossaryQuery(e.target.value)}
+                  style={{ width: 240 }}
+                />
+              }
+            >
+              {filteredGlossary.length === 0 ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="검색 결과가 없습니다. 다른 키워드로 검색해보세요."
+                />
+              ) : (
+                <div style={{ maxHeight: '70vh', overflowY: 'auto', paddingRight: 4 }}>
+                  <Flex vertical gap={10}>
+                    {filteredGlossary.map((item) => (
+                      <div key={item.term} style={{ padding: 12, border: '1px solid #303030', borderRadius: 8 }}>
+                        <Flex align="center" gap={8} style={{ marginBottom: 4 }}>
+                          <Tag color="processing">{item.term}</Tag>
+                          <Text>{item.simple}</Text>
+                        </Flex>
+                        <Text type="secondary">{item.detail}</Text>
+                      </div>
+                    ))}
+                  </Flex>
+                </div>
+              )}
+            </Card>
+          </div>
+        </Col>
+      </Row>
     </div>
   );
 }
