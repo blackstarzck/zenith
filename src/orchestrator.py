@@ -299,16 +299,34 @@ class Orchestrator:
                 signal = self._strategy.evaluate_exit(symbol, snapshot, pos, regime=self._current_regime)
 
                 # 매도 스코어 수집 (Phase 1: 임시 저장 → _evaluate_entries에서 병합)
+                exit_threshold_effective = self._strategy._effective_exit_threshold(self._current_regime)
                 if signal.score is not None:
+                    if signal.signal in (Signal.SELL_HALF, Signal.SELL_ALL, Signal.STOP_LOSS):
+                        exit_decision = "SELL"
+                        exit_block_reason = None
+                    else:
+                        exit_decision = "HOLD"
+                        # HOLD 사유를 그대로 노출해 "왜 안 팔렸는지"를 UI에서 설명
+                        exit_block_reason = signal.reason
                     self._exit_scores[symbol] = {
                         "exit_score": round(signal.score, 1),
                         "exit_rsi": round(self._strategy._score_exit_rsi_level(snapshot.rsi), 0),
                         "exit_bb": round(self._strategy._score_exit_bb_position(snapshot.current_price, snapshot.bb), 0),
                         "exit_profit": round(self._strategy._score_exit_profit(snapshot.current_price, pos.entry_price), 0),
                         "exit_adx": round(self._strategy._score_exit_adx(snapshot.adx), 0),
+                        "exit_threshold_effective": round(exit_threshold_effective, 1),
+                        "exit_decision": exit_decision,
+                        "exit_block_reason": exit_block_reason,
                     }
                 else:
-                    self._exit_scores[symbol] = {"exit_score": None, "exit_status": "trailing"}
+                    # 1차 익절 후 트레일링 대기 상태 (스코어링 비활성)
+                    self._exit_scores[symbol] = {
+                        "exit_score": None,
+                        "exit_status": "trailing",
+                        "exit_threshold_effective": round(exit_threshold_effective, 1),
+                        "exit_decision": "TRAILING",
+                        "exit_block_reason": signal.reason if signal.signal == Signal.HOLD else None,
+                    }
 
                 if signal.signal == Signal.STOP_LOSS:
                     self._execute_sell_all(symbol, pos, signal.reason, label="손절 매도")
@@ -478,18 +496,18 @@ class Orchestrator:
 
         # Phase 2: 매도 스코어 병합 (exit scores → symbol_indicators)
         positions = self._risk.get_all_positions()
-        exit_threshold_effective = self._config.strategy.exit_score_threshold
         for sym, exit_data in self._exit_scores.items():
             if sym not in positions:
                 continue  # 이미 매도된 종목의 stale 데이터 무시
-            # 매도 임계치/판정 추가
-            es = exit_data.get("exit_score")
-            exit_decision = "SELL" if (es is not None and es >= exit_threshold_effective) else "HOLD"
-            if exit_data.get("exit_status") == "trailing":
-                exit_decision = "TRAILING"
-            exit_data["exit_threshold_effective"] = exit_threshold_effective
-            exit_data["exit_decision"] = exit_decision
-            exit_data["exit_block_reason"] = None
+            # 이전 버전 데이터 호환: 누락 시 최소 필드 보완
+            if "exit_threshold_effective" not in exit_data:
+                exit_data["exit_threshold_effective"] = self._config.strategy.exit_score_threshold
+            if "exit_decision" not in exit_data:
+                es = exit_data.get("exit_score")
+                threshold = float(exit_data.get("exit_threshold_effective") or self._config.strategy.exit_score_threshold)
+                exit_data["exit_decision"] = "SELL" if (es is not None and es >= threshold) else "HOLD"
+            if "exit_block_reason" not in exit_data:
+                exit_data["exit_block_reason"] = None
             if sym in symbol_indicators:
                 symbol_indicators[sym].update(exit_data)
             else:

@@ -162,11 +162,13 @@ export const GUIDE_DIAGRAMS: Record<string, { title: string; chart: string }[]> 
     end
 
     subgraph HARD["하드 룰 (즉시 매도)"]
-        M4 --> H1{"ATR 손절\\n현재가 ≤ 진입가 - ATR×2.5?"}
+        M4 --> H1{"ATR 손절\\n현재가 ≤ 진입가 - ATR×레짐배수\\n(횡보2.8/추세2.2/변동2.5)?"}
         H1 -->|"예"| H2["🔴 즉시 전량 매도\\n(STOP_LOSS)"]
-        H1 -->|"아니오"| H3{"트레일링 스탑\\n(반매도 후 활성)\\n현재가 ≤ 고점 - ATR×2.0?"}
+        H1 -->|"아니오"| H3{"트레일링 스탑\\n(반매도 후 활성)\\n현재가 ≤ max(고점-ATR×적응배수, 본전+마진)?"}
         H3 -->|"예"| H4["🔴 잔량 전량 매도\\n(TRAILING_STOP)"]
-        H3 -->|"아니오"| EXIT_SCORE
+        H3 -->|"아니오"| H5{"이미 반매도\\n(half_sold)?"}
+        H5 -->|"예"| H6["⏳ 홀딩 유지\\n(스코어링 비활성, 트레일링 대기)"]
+        H5 -->|"아니오"| EXIT_SCORE
     end
 
     subgraph EXIT_SCORE["4-팩터 청산 스코어링"]
@@ -174,17 +176,17 @@ export const GUIDE_DIAGRAMS: Record<string, { title: string; chart: string }[]> 
         E2["BB 위치 스코어"] --> E5
         E3["수익률 스코어"] --> E5
         E4["ADX 스코어"] --> E5
-        E5 --> E6{"exit_score ≥\\nexit_threshold?"}
+        E5 --> E6{"exit_score ≥\\n실효 임계치?"}
         E6 -->|"미달"| E7["⏳ 홀딩 유지"]
-        E6 -->|"충족"| E8{"최소 수익률\\nmin_profit_margin 충족?"}
+        E6 -->|"충족"| E8{"적응형 최소 수익률\\nadaptive_margin 충족?"}
         E8 -->|"미달"| E7
-        E8 -->|"충족"| E9{"이미 반매도\\n했는가?"}
-        E9 -->|"아니오"| E10["🟡 50% 매도\\n(SELL_HALF)"]
-        E9 -->|"예"| E11["🟢 잔량 전량 매도\\n(SELL_ALL)"]
+        E8 -->|"충족"| E9{"품질 게이트 통과?\\n(BB 중앙선 도달 OR 초과수익)"}
+        E9 -->|"미통과"| E7
+        E9 -->|"통과"| E10["🟡 40% 매도\\n(SELL_HALF)"]
     end
 
     subgraph POST["사후 처리"]
-        H2 & H4 & E10 & E11 --> P1["실제 잔고 조회\\nget_balance()"]
+        H2 & H4 & E10 --> P1["실제 잔고 조회\\nget_balance()"]
         P1 --> P2["시장가 매도 집행"]
         P2 --> P3["PnL 계산 (수수료 반영)"]
         P3 --> P4["일일 손실 한도 체크\\nrecord_realized_pnl()"]
