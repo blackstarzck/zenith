@@ -30,7 +30,8 @@ class NewsCollector:
         self._target_currency_set = set(self._target_currencies)
         self._max_news = config.max_news_per_poll
         self._timeout = config.api_timeout_sec
-        self._endpoint = "https://cryptopanic.com/api/developer/v2/posts/"
+        self._endpoint_v2 = "https://cryptopanic.com/api/developer/v2/posts/"
+        self._endpoint_v1 = "https://cryptopanic.com/api/v1/posts/"
         self._alias_map: dict[str, str] = {
             "비트코인": "BTC",
             "이더리움": "ETH",
@@ -48,6 +49,83 @@ class NewsCollector:
         }
         self._market_symbol_pattern = re.compile(r"\b(?:KRW|BTC|USDT)-([A-Z0-9]{2,12})\b")
         self._ticker_pattern = re.compile(r"\b([A-Z]{2,12})\b")
+
+    def _fetch_posts_json(
+        self,
+        client: httpx.Client,
+        *,
+        endpoint: str,
+        params: dict[str, str],
+        max_attempts: int = 3,
+    ) -> dict[str, Any] | None:
+        headers = {"User-Agent": "Zenith/1.0"}
+        backoff_sec = 1.0
+
+        for attempt in range(max_attempts):
+            try:
+                response = client.get(endpoint, params=params, headers=headers)
+            except httpx.RequestError:
+                logger.warning(
+                    "CryptoPanic 요청 실패(네트워크) - %d/%d 재시도",
+                    attempt + 1,
+                    max_attempts,
+                )
+                if attempt < max_attempts - 1:
+                    time.sleep(backoff_sec)
+                    backoff_sec = min(backoff_sec * 2, 8.0)
+                    continue
+                return None
+
+            status = int(response.status_code)
+
+            # 레이트 리밋
+            if status == 429:
+                retry_after = (response.headers or {}).get("Retry-After", "")
+                try:
+                    wait = float(retry_after) if retry_after else backoff_sec
+                except ValueError:
+                    wait = backoff_sec
+
+                wait = max(0.5, min(wait, 30.0))
+                logger.warning("CryptoPanic 레이트 리밋(429) - %.1fs 대기 후 재시도", wait)
+                time.sleep(wait)
+                backoff_sec = min(backoff_sec * 2, 8.0)
+                continue
+
+            # 서버 오류(5xx) 재시도
+            if 500 <= status < 600:
+                logger.warning(
+                    "CryptoPanic 서버 오류(%d) - %d/%d 재시도",
+                    status,
+                    attempt + 1,
+                    max_attempts,
+                )
+                if attempt < max_attempts - 1:
+                    time.sleep(backoff_sec)
+                    backoff_sec = min(backoff_sec * 2, 8.0)
+                    continue
+                return None
+
+            # 기타 오류(4xx 등)
+            if status < 200 or status >= 300:
+                logger.warning("CryptoPanic 요청 실패(%d) - API 키/파라미터 확인 필요", status)
+                return None
+
+            try:
+                return response.json()
+            except Exception:
+                logger.warning(
+                    "CryptoPanic 응답 JSON 파싱 실패 - %d/%d 재시도",
+                    attempt + 1,
+                    max_attempts,
+                )
+                if attempt < max_attempts - 1:
+                    time.sleep(backoff_sec)
+                    backoff_sec = min(backoff_sec * 2, 8.0)
+                    continue
+                return None
+
+        return None
 
     def _dedupe_keep_order(self, items: list[str]) -> list[str]:
         unique: list[str] = []
@@ -138,18 +216,28 @@ class NewsCollector:
             logger.warning("CryptoPanic API 키가 설정되지 않았습니다.")
             return []
 
-        params = {
+        params_v2: dict[str, str] = {
+            "auth_token": self._api_key,
+            "currencies": self._currencies,
+            "regions": "ko",
+            # v2 개발자 API는 public=true를 요구하는 경우가 있어 명시합니다.
+            "public": "true",
+        }
+        params_v1: dict[str, str] = {
             "auth_token": self._api_key,
             "currencies": self._currencies,
             "regions": "ko",
         }
 
+        time.sleep(0.5)  # Rate limiting 방어
         try:
-            time.sleep(0.5)  # Rate limiting 방어
             with httpx.Client(timeout=self._timeout) as client:
-                response = client.get(self._endpoint, params=params)
-                response.raise_for_status()
-                data = response.json()
+                data = self._fetch_posts_json(client, endpoint=self._endpoint_v2, params=params_v2)
+                if data is None:
+                    data = self._fetch_posts_json(client, endpoint=self._endpoint_v1, params=params_v1)
+
+            if not data:
+                return []
 
             results = data.get("results", [])
             news_list: list[dict[str, Any]] = []
@@ -183,6 +271,6 @@ class NewsCollector:
             time.sleep(0.5)  # Rate limiting 방어
             return news_list
 
-        except Exception as e:
-            logger.warning("뉴스 수집 실패: %s", e)
+        except Exception:
+            logger.warning("뉴스 수집 실패: 예외 발생(다음 주기에 재시도)")
             return []

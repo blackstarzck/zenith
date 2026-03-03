@@ -111,7 +111,7 @@ class TestStrategyParamsSerialization:
         assert d["w_bb_recovery"] == 0.9
         assert d["w_rsi_slope"] == 1.2
         assert d["w_rsi_level"] == 1.3
-        assert d["entry_score_threshold"] == 78.0
+        assert d["entry_score_threshold"] == 75.0
 
     def test_from_dict_with_scoring_weights(self):
         """from_dict는 스코어링 가중치를 복원합니다."""

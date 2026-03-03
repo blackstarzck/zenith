@@ -52,10 +52,10 @@ const formatKellyBadge = (fraction: number | null | undefined) => {
   return { text: `Kelly ${pct}%`, color };
 };
 
-const getRegimeOffset = (regime: string, strategy: StrategyParams): number => {
-  if (regime === 'trending') return strategy.regime_trending_offset ?? 15;
-  if (regime === 'volatile') return strategy.regime_volatile_offset ?? 25;
-  return 0;
+const getRegimeThreshold = (regime: string, strategy: StrategyParams): number => {
+  if (regime === 'trending') return strategy.entry_threshold_trending ?? 70;
+  if (regime === 'volatile') return strategy.entry_threshold_volatile ?? 80;
+  return strategy.entry_threshold_ranging ?? 75;
 };
 
 const HEADER_TOOLTIP_STYLE = {
@@ -492,6 +492,21 @@ const buildBaseSymbolColumns = (strategyParams: StrategyParams | null): ColumnsT
           title={
             <div>
               <div>청산 스코어 (가중치 합산)</div>
+              <div style={{ marginTop: 6, color: '#bfbfbf' }}>
+                레짐별 실효 임계치 적용
+                <br />
+                (횡보=기본, 추세=+4, 변동성=+2)
+              </div>
+              <div style={{ marginTop: 6, color: '#bfbfbf' }}>
+                1차 익절(기본 40%)은
+                <br />
+                적응형 최소수익률 + 품질게이트 통과 시만 실행
+              </div>
+              <div style={{ marginTop: 6, color: '#bfbfbf' }}>
+                1차 익절 후에는 스코어링 비활성,
+                <br />
+                트레일링 스탑만 작동
+              </div>
               <div style={{ marginTop: 6 }}>
                 <span style={{ color: '#cf1322' }}>■</span> 임계치 이상 — 매도 임박
               </div>
@@ -525,7 +540,7 @@ const buildBaseSymbolColumns = (strategyParams: StrategyParams | null): ColumnsT
       if (exitScore == null) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
 
       const weights = strategyParams ?? DEFAULT_STRATEGY;
-      const exitThreshold = ind.exit_threshold_effective ?? (strategyParams?.exit_score_threshold ?? 70);
+      const exitThreshold = ind.exit_threshold_effective ?? (strategyParams?.exit_score_threshold ?? DEFAULT_STRATEGY.exit_score_threshold ?? 73);
 
       // 매도 스코어: 높을수록 매도 임박 → 빨강
       const color = exitScore >= exitThreshold ? '#cf1322' : exitScore >= exitThreshold - 15 ? '#fa8c16' : '#389e0d';
@@ -550,6 +565,11 @@ const buildBaseSymbolColumns = (strategyParams: StrategyParams | null): ColumnsT
               <div style={{ borderTop: '1px solid #444', marginTop: 6, paddingTop: 6, textAlign: 'right' }}>
                 임계치: {exitThreshold.toFixed(1)}
               </div>
+              {ind.exit_block_reason && (
+                <div style={{ borderTop: '1px solid #444', marginTop: 6, paddingTop: 6, color: '#fa8c16' }}>
+                  {ind.exit_block_reason}
+                </div>
+              )}
             </div>
           }
         >
@@ -925,19 +945,19 @@ export default function DashboardPage() {
           {botState?.market_regime && REGIME_DISPLAY[botState.market_regime] && (
             <Tooltip
               destroyOnHidden
-              styles={{ root: HEADER_TOOLTIP_STYLE, body: HEADER_TOOLTIP_INNER_STYLE }}
+              styles={{ root: HEADER_TOOLTIP_STYLE, container: HEADER_TOOLTIP_INNER_STYLE }}
               title={(
                 <div>
                   <div style={{ fontWeight: 600, marginBottom: 6 }}>시장 레짐 (BTC 기준)</div>
                   <div>의미: 현재 시장 상태를 3가지로 분류해 진입 난이도를 자동 조절합니다.</div>
-                  <div style={{ marginTop: 6 }}>
-                    <span style={{ color: '#389e0d' }}>■</span> 횡보장: 추가 가산 없음 (offset +0)
+                  <div>
+                    <span style={{ color: '#389e0d' }}>■</span> 횡보장: 임계값 {strategyForTooltip.entry_threshold_ranging ?? 75}점
                   </div>
                   <div>
-                    <span style={{ color: '#d48806' }}>■</span> 추세장: 임계치 +{strategyForTooltip.regime_trending_offset ?? 15}
+                    <span style={{ color: '#d48806' }}>■</span> 추세장: 임계값 {strategyForTooltip.entry_threshold_trending ?? 70}점
                   </div>
                   <div>
-                    <span style={{ color: '#cf1322' }}>■</span> 변동성 폭발: 임계치 +{strategyForTooltip.regime_volatile_offset ?? 25}
+                    <span style={{ color: '#cf1322' }}>■</span> 변동성 폭발: 임계값 {strategyForTooltip.entry_threshold_volatile ?? 80}점
                   </div>
                   <div style={{ marginTop: 8, borderTop: '1px solid #444', paddingTop: 8 }}>
                     기준값:
@@ -947,10 +967,8 @@ export default function DashboardPage() {
                   <div style={{ marginTop: 8 }}>
                     현재 영향:
                     {(() => {
-                      const offset = getRegimeOffset(botState.market_regime, strategyForTooltip);
-                      const base = strategyForTooltip.entry_score_threshold ?? 70;
-                      const effective = Math.min(base + offset, 99);
-                      return ` 진입 임계치 ${base} → ${effective}`;
+                      const effective = getRegimeThreshold(botState.market_regime, strategyForTooltip);
+                      return ` 진입 임계치 ${effective}점`;
                     })()}
                   </div>
                 </div>
@@ -966,7 +984,7 @@ export default function DashboardPage() {
             return badge ? (
               <Tooltip
                 destroyOnHidden
-                styles={{ root: HEADER_TOOLTIP_STYLE, body: HEADER_TOOLTIP_INNER_STYLE }}
+                styles={{ root: HEADER_TOOLTIP_STYLE, container: HEADER_TOOLTIP_INNER_STYLE }}
                 title={(
                   <div>
                     <div style={{ fontWeight: 600, marginBottom: 6 }}>Kelly 비중</div>

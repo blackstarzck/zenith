@@ -340,19 +340,14 @@ class Orchestrator:
         elif self._entry_blocked_until and datetime.now() >= self._entry_blocked_until:
             logger.info("[연속 손절 브레이커] 차단 해제 — 신규 매수 재개")
             self._entry_blocked_until = None
-        # 레짐 기반 threshold offset 계산 (하이브리드 필터)
-        regime_offset = 0.0
-        if self._current_regime == "trending":
-            regime_offset = self._config.strategy.regime_trending_offset
-        elif self._current_regime == "volatile":
-            regime_offset = self._config.strategy.regime_volatile_offset
+        # 레짐 기반 진입 임계값 조회 (절대값 방식)
+        entry_threshold_effective = self._config.strategy.get_entry_threshold(self._current_regime)
 
-        if regime_offset > 0 and self._loop_count % 60 == 1:
+        if self._loop_count % 60 == 1:
             logger.info(
-                "[레짐 오프셋] 시장 레짐 '%s' — 진입 임계치 +%.0f 적용 중",
-                self._current_regime, regime_offset,
+                "[레짐 임계값] 시장 레짐 '%s' — 진입 임계치 %.0f 적용 중",
+                self._current_regime, entry_threshold_effective,
             )
-
         try:
             current_balance = self._get_total_balance_krw()
             krw = self._collector.get_krw_balance()
@@ -426,12 +421,10 @@ class Orchestrator:
                     # 진입 스코어 평가 (쿨다운/리스크 체크 전에 수행 — 지표로 항상 노출)
                     signal = self._strategy.evaluate_entry(
                         symbol, snapshot, closes,
-                        threshold_offset=regime_offset,
                         regime=self._current_regime,
                     )
 
-                    entry_threshold_base = self._config.strategy.entry_score_threshold
-                    entry_threshold_effective = min(entry_threshold_base + regime_offset, 99)
+                    entry_threshold_base = entry_threshold_effective
                     entry_score = round(signal.score, 1) if signal.score is not None else None
                     entry_decision = "BUY" if signal.signal == Signal.BUY else (
                         "PAUSE" if signal.signal == Signal.MARKET_PAUSE else "HOLD"
@@ -453,9 +446,9 @@ class Orchestrator:
                     # 진입 지표에 스코어 정보 추가
                     symbol_indicators[symbol].update({
                         "entry_score": entry_score,
-                        "entry_threshold_base": entry_threshold_base,
+                        "entry_threshold_base": entry_threshold_effective,
                         "entry_threshold_effective": entry_threshold_effective,
-                        "entry_regime_offset": regime_offset,
+                        "entry_regime": self._current_regime,
                         "entry_decision": entry_decision,
                         "entry_block_reason": global_entry_block_reason or signal.reason,
                         "entry_executable": entry_executable,

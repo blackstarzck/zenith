@@ -63,7 +63,6 @@ class MeanReversionEngine:
         symbol: str,
         snapshot: IndicatorSnapshot,
         closes_series: "pd.Series | None" = None,
-        threshold_offset: float = 0.0,
         regime: str = "ranging",
     ) -> TradeSignal:
         """매수 진입 조건을 스코어링 방식으로 평가합니다.
@@ -118,15 +117,15 @@ class MeanReversionEngine:
         reason_str = f"스코어 {total_score:.1f} ({breakdown})"
 
         # ── 임계치 비교 ──
-        # ── effective threshold 계산 (레짐 오프셋 + 99 캡) ──
-        effective_threshold = min(params.entry_score_threshold + threshold_offset, 99.0)
+        # ── 레짐별 절대 임계값 조회 ──
+        effective_threshold = params.get_entry_threshold(regime)
 
         if total_score >= effective_threshold:
             stop_loss = price - (snapshot.atr * params.get_atr_multiplier(regime))
             return TradeSignal(
                 signal=Signal.BUY,
                 symbol=symbol,
-                reason=f"{reason_str} ≥ {effective_threshold:.1f}" + (f" (기본 {params.entry_score_threshold:.1f} + 레짐 {threshold_offset:+.0f})" if threshold_offset > 0 else ""),
+                reason=f"{reason_str} ≥ {effective_threshold:.1f} (레짐: {regime})",
                 price=price,
                 stop_loss_price=stop_loss,
                 target_price_1=bb.middle,
@@ -233,6 +232,9 @@ class MeanReversionEngine:
         params = self._params
         entry_price = position.entry_price
         has_sold_half = position.has_sold_half
+        profit_pct = (price - entry_price) / entry_price if entry_price > 0 else 0.0
+        effective_exit_threshold = self._effective_exit_threshold(regime)
+        adaptive_profit_margin = self._adaptive_min_profit_margin(entry_price, snapshot.atr)
 
         # ── [하드 룰 1] 동적 손절 (ATR 기반) ──
         stop_loss_price = entry_price - (snapshot.atr * params.get_atr_multiplier(regime))
@@ -247,12 +249,20 @@ class MeanReversionEngine:
 
         # ── [하드 룰 2] 트레일링 스탑 (1차 익절 후 활성) ──
         if has_sold_half and position.trailing_high > 0:
-            trailing_stop = position.trailing_high - (snapshot.atr * params.trailing_stop_atr_multiplier)
+            trailing_multiplier = self._trailing_stop_multiplier(regime, profit_pct)
+            trailing_stop = position.trailing_high - (snapshot.atr * trailing_multiplier)
+            # 잔량은 본전+최소마진 이상에서 정리되도록 보호선을 추가
+            break_even_floor = entry_price * (1.0 + max(params.min_profit_margin, 0.001))
+            trailing_stop = max(trailing_stop, break_even_floor)
             if price <= trailing_stop:
                 return TradeSignal(
                     signal=Signal.SELL_ALL,
                     symbol=symbol,
-                    reason=f"트레일링 스탑 발동 (고점 {position.trailing_high:,.2f} → 현재 {price:,.2f} ≤ {trailing_stop:,.2f})",
+                    reason=(
+                        f"트레일링 스탑 발동 "
+                        f"(고점 {position.trailing_high:,.2f} → 현재 {price:,.2f} ≤ {trailing_stop:,.2f}, "
+                        f"배수 {trailing_multiplier:.2f})"
+                    ),
                     price=price,
                     stop_loss_price=trailing_stop,
                 )
@@ -295,24 +305,44 @@ class MeanReversionEngine:
         reason_str = f"청산 스코어 {total_score:.1f} ({breakdown})"
 
         # ── 임계치 비교 ──
-        if total_score >= params.exit_score_threshold:
+        if total_score >= effective_exit_threshold:
             # 최소 수익 마진 확인 (1차 익절 시에만)
-            profit_pct = (price - entry_price) / entry_price if entry_price > 0 else 0.0
-            if not has_sold_half and profit_pct < params.min_profit_margin:
+            if not has_sold_half and profit_pct < adaptive_profit_margin:
                 return TradeSignal(
                     signal=Signal.HOLD,
                     symbol=symbol,
-                    reason=f"{reason_str} ≥ {params.exit_score_threshold:.1f} 이나 수익률 부족 ({profit_pct:.2%} < {params.min_profit_margin:.2%})",
+                    reason=(
+                        f"{reason_str} ≥ {effective_exit_threshold:.1f} 이나 수익률 부족 "
+                        f"({profit_pct:.2%} < {adaptive_profit_margin:.2%})"
+                    ),
                     price=price,
                     stop_loss_price=stop_loss_price,
                     score=total_score,
                 )
 
+            # 1차 익절은 '평균 복귀 확인(BB 중앙선 도달)' 또는
+            # '적응형 마진 대비 충분한 초과수익'일 때만 허용해 조기 청산을 억제
+            if not has_sold_half:
+                reached_bb_middle = price >= bb.middle
+                strong_profit = profit_pct >= (adaptive_profit_margin * 1.8)
+                if not reached_bb_middle and not strong_profit:
+                    return TradeSignal(
+                        signal=Signal.HOLD,
+                        symbol=symbol,
+                        reason=(
+                            f"{reason_str} ≥ {effective_exit_threshold:.1f} 이나 익절 품질 게이트 미통과 "
+                            f"(중앙선 미도달, {profit_pct:.2%} < {adaptive_profit_margin * 1.8:.2%})"
+                        ),
+                        price=price,
+                        stop_loss_price=stop_loss_price,
+                        score=total_score,
+                    )
+
             signal_type = Signal.SELL_ALL if has_sold_half else Signal.SELL_HALF
             return TradeSignal(
                 signal=signal_type,
                 symbol=symbol,
-                reason=f"{reason_str} ≥ {params.exit_score_threshold:.1f}",
+                reason=f"{reason_str} ≥ {effective_exit_threshold:.1f}",
                 price=price,
                 stop_loss_price=stop_loss_price,
                 target_price_1=bb.middle if not has_sold_half else None,
@@ -323,13 +353,59 @@ class MeanReversionEngine:
         return TradeSignal(
             signal=Signal.HOLD,
             symbol=symbol,
-            reason=f"{reason_str} < {params.exit_score_threshold:.1f}",
+            reason=f"{reason_str} < {effective_exit_threshold:.1f}",
             price=price,
             stop_loss_price=stop_loss_price,
             score=total_score,
         )
 
     # ── 매도 스코어링 헬퍼 메서드 ──────────────────────────────
+
+    def _effective_exit_threshold(self, regime: str) -> float:
+        """레짐별 청산 임계치를 계산합니다.
+
+        - 추세장/변동성장에서는 조기 익절을 줄이기 위해 임계치를 상향
+        - 횡보장은 기본 임계치를 사용
+        """
+        base = self._params.exit_score_threshold
+        if regime == "trending":
+            return min(95.0, base + 4.0)
+        if regime == "volatile":
+            return min(95.0, base + 2.0)
+        return base
+
+    def _adaptive_min_profit_margin(self, entry_price: float, atr: float) -> float:
+        """ATR 기반 적응형 최소 익절 마진을 계산합니다.
+
+        시장 호흡(ATR)이 큰 구간에서는 최소 익절 마진을 자동 상향해
+        노이즈성 조기 청산을 줄이고 손익비를 개선합니다.
+        """
+        if entry_price <= 0:
+            return self._params.min_profit_margin
+        atr_ratio = max(0.0, atr / entry_price)
+        atr_based_margin = min(0.012, max(0.003, atr_ratio * 0.8))
+        return max(self._params.min_profit_margin, atr_based_margin)
+
+    def _trailing_stop_multiplier(self, regime: str, profit_pct: float) -> float:
+        """잔량 청산용 트레일링 배수를 상황에 맞게 조정합니다."""
+        mult = self._params.trailing_stop_atr_multiplier
+
+        if regime == "trending":
+            mult += 0.4  # 추세장: 너무 빠른 청산 방지
+        elif regime == "volatile":
+            mult += 0.2
+        elif regime == "ranging":
+            mult -= 0.1  # 횡보장: 수익 보호를 위해 조금 타이트하게
+
+        # 이익이 충분히 누적될수록 스탑을 당겨 수익 잠금 강화
+        if profit_pct >= 0.05:
+            mult -= 0.5
+        elif profit_pct >= 0.03:
+            mult -= 0.3
+        elif profit_pct < 0.01:
+            mult += 0.2
+
+        return max(1.2, min(3.5, mult))
 
     def _score_exit_rsi_level(self, rsi: float) -> float:
         """RSI 과매수 스코어. 높은 RSI = 높은 청산 점수."""

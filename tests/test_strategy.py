@@ -97,7 +97,7 @@ class TestEntrySignals:
         # Vol: (3-0.5)/2*100=125→100, MA:50, ADX:(40-10)/25*100=120→100,
         # BB:0, RSI↗:50, RSI:(45-20)/25*100=100
         # weighted avg = (100+50+100+0+50+100)/6 = 66.7
-        params = StrategyParams(entry_score_threshold=50.0)
+        params = StrategyParams(entry_threshold_ranging=50.0)
         engine = make_engine(params)
         snap = make_snapshot(price=48500, rsi=20, adx=10, volatility_ratio=0.5)
         signal = engine.evaluate_entry("KRW-BTC", snap)
@@ -296,6 +296,66 @@ class TestExitSignals:
         signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
         assert signal.signal == Signal.HOLD
         assert "수익률 부족" in signal.reason
+
+    def test_exit_threshold_is_stricter_in_trending(self):
+        """추세장에서는 effective_exit_threshold 상향으로 조기 익절을 억제한다."""
+        params = StrategyParams(
+            exit_score_threshold=70.0,
+            min_profit_margin=0.001,
+            w_exit_rsi_level=1.0,
+            w_exit_bb_position=1.0,
+            w_exit_profit_pct=1.0,
+            w_exit_adx_trend=1.0,
+        )
+        engine = make_engine(params)
+        snap = make_snapshot(
+            price=51200, bb_middle=50000, bb_upper=52000, bb_lower=48000,
+            atr=100, rsi=70, adx=24,
+        )
+        pos = make_position(entry_price=50000)
+
+        signal_ranging = engine.evaluate_exit("KRW-BTC", snap, pos, regime="ranging")
+        signal_trending = engine.evaluate_exit("KRW-BTC", snap, pos, regime="trending")
+
+        assert signal_ranging.signal == Signal.SELL_HALF
+        assert signal_trending.signal == Signal.HOLD
+
+    def test_exit_quality_gate_blocks_early_take_profit(self):
+        """중앙선 미도달 + 초과수익 부족이면 스코어 충족이어도 HOLD."""
+        params = StrategyParams(
+            exit_score_threshold=70.0,
+            min_profit_margin=0.003,
+            w_exit_rsi_level=1.0,
+            w_exit_bb_position=1.0,
+            w_exit_profit_pct=1.0,
+            w_exit_adx_trend=1.0,
+        )
+        engine = make_engine(params)
+        snap = make_snapshot(
+            price=50250, bb_middle=50500, bb_upper=50300, bb_lower=48000,
+            atr=100, rsi=80, adx=35,
+        )
+        signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
+
+        assert signal.signal == Signal.HOLD
+        assert "익절 품질 게이트 미통과" in signal.reason
+
+    def test_trailing_stop_respects_break_even_floor(self):
+        """1차 익절 후 잔량은 본전+마진 보호선 아래로 내려가면 청산한다."""
+        params = StrategyParams(
+            trailing_stop_atr_multiplier=2.4,
+            min_profit_margin=0.0045,
+        )
+        engine = make_engine(params)
+        snap = make_snapshot(price=50200, atr=500)
+        signal = engine.evaluate_exit(
+            "KRW-BTC",
+            snap,
+            make_position(entry_price=50000, has_sold_half=True, trailing_high=50300),
+            regime="ranging",
+        )
+        assert signal.signal == Signal.SELL_ALL
+        assert "트레일링 스탑" in signal.reason
 
 
 # ── 레짐 적응형 전략 테스트 ───────────────────────────────────

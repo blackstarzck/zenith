@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from supabase import create_client, Client
 from supabase.lib.client_options import SyncClientOptions
@@ -431,7 +431,10 @@ class StorageClient:
 
     # ── sentiment_insights ────────────────────────────────────
 
-    def insert_sentiment_insight(self, data: dict[str, Any]) -> dict[str, Any]:
+    def insert_sentiment_insight(
+        self,
+        data: dict[str, Any],
+    ) -> Literal["inserted", "duplicate", "error"]:
         """뉴스 감성 분석 결과를 저장합니다."""
         try:
             row = {
@@ -453,12 +456,18 @@ class StorageClient:
                 "baseline_price": data.get("baseline_price"),
                 "pending_reason": data.get("pending_reason"),
             }
-            result = self._client.table("sentiment_insights").insert(row).execute()
-            logger.info("감성 분석 저장: %s", data.get("title", "")[:50])
-            return result.data[0] if result.data else {}
+            result = (
+                self._client.table("sentiment_insights")
+                .upsert(row, on_conflict="news_id", ignore_duplicates=True)
+                .execute()
+            )
+            if result.data:
+                logger.info("감성 분석 저장: %s", data.get("title", "")[:50])
+                return "inserted"
+            return "duplicate"
         except Exception:
             logger.exception("감성 분석 결과 저장 실패: %s", data.get("news_id", "?"))
-            return {}
+            return "error"
     def update_sentiment_insight(self, news_id: str, analysis: dict[str, Any]) -> bool:
         """뉴스 감성 분석 결과를 업데이트합니다 (2-phase: 뉴스 먼저 저장 → 분석 후 업데이트)."""
         try:

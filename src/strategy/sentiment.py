@@ -39,7 +39,9 @@ class SentimentAnalyzer:
             return self._horizon_short_min
         return self._horizon_long_min
 
-    def _normalize_result(self, raw: dict[str, Any], *, no_symbol: bool = False) -> dict[str, Any]:
+    def _normalize_result(
+        self, raw: dict[str, Any], *, no_symbol: bool = False
+    ) -> dict[str, Any]:
         """모델 응답을 보정하고 방향성 게이트를 적용합니다."""
         score = float(raw.get("sentiment_score") or 0.0)
         score = self._clamp(score, -1.0, 1.0)
@@ -66,8 +68,13 @@ class SentimentAnalyzer:
             reasoning_chain = "코인 식별 실패로 방향성 판단을 건너뜀"
 
         if decision in {"BUY", "SELL"}:
-            if confidence < self._min_conf_for_direction or abs(score) < self._min_abs_score_for_direction:
-                pending_reason = f"방향성 게이트 미통과(conf={confidence:.1f}, score={score:+.2f})"
+            if (
+                confidence < self._min_conf_for_direction
+                or abs(score) < self._min_abs_score_for_direction
+            ):
+                pending_reason = (
+                    f"방향성 게이트 미통과(conf={confidence:.1f}, score={score:+.2f})"
+                )
                 decision = "WAIT"
 
         return {
@@ -124,43 +131,75 @@ class SentimentAnalyzer:
   "negative_factors": ["부정요인1", ...]
 }"""
 
-        user_prompt = f"뉴스 제목: {title}\n출처: {source}\n관련 코인: {', '.join(currencies)}"
+        user_prompt = (
+            f"뉴스 제목: {title}\n출처: {source}\n관련 코인: {', '.join(currencies)}"
+        )
 
-        payload = {
+        base_payload = {
             "model": self._model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.2,
-            "max_completion_tokens": 1024,
-            "response_format": {"type": "json_object"},
         }
+
+        payload_variants: list[dict[str, Any]] = [
+            {
+                **base_payload,
+                "max_completion_tokens": 1024,
+                "response_format": {"type": "json_object"},
+            },
+            {
+                **base_payload,
+                "max_tokens": 1024,
+                "response_format": {"type": "json_object"},
+            },
+            {
+                **base_payload,
+                "max_tokens": 1024,
+            },
+            {
+                **base_payload,
+                "max_completion_tokens": 1024,
+            },
+        ]
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
 
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                response = client.post(self._ENDPOINT, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
+        last_error: Exception | None = None
+        for idx, payload in enumerate(payload_variants):
+            try:
+                with httpx.Client(timeout=self._timeout) as client:
+                    response = client.post(
+                        self._ENDPOINT, json=payload, headers=headers
+                    )
+                    response.raise_for_status()
+                    data = response.json()
 
-            choices = data.get("choices", [])
-            if not choices:
-                logger.warning("Groq 응답에 choices가 없습니다.")
-                return default_result
+                choices = data.get("choices", [])
+                if not choices:
+                    logger.warning("Groq 응답에 choices가 없습니다.")
+                    return default_result
 
-            text = choices[0].get("message", {}).get("content", "")
-            text = re.sub(r"^```json\s*", "", text, flags=re.IGNORECASE)
-            text = re.sub(r"\s*```$", "", text)
-            text = text.strip()
+                text = choices[0].get("message", {}).get("content", "")
+                text = re.sub(r"^```json\s*", "", text, flags=re.IGNORECASE)
+                text = re.sub(r"\s*```$", "", text)
+                text = text.strip()
 
-            result = json.loads(text)
-            return self._normalize_result(result)
+                result = json.loads(text)
+                if idx > 0:
+                    logger.info(
+                        "감성 분석 요청 호환 모드로 복구 완료(variant=%d)", idx + 1
+                    )
+                return self._normalize_result(result)
 
-        except Exception as e:
-            logger.warning("감성 분석 실패: %s", e)
-            return default_result
+            except Exception as e:
+                last_error = e
+                continue
+
+        logger.warning("감성 분석 실패: %s", last_error)
+        return default_result

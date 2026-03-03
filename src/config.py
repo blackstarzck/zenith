@@ -102,8 +102,8 @@ class StrategyParams:
     volatility_overload_ratio: float = 2.0
 
 
-    # 최소 익절 마진 (수수료 0.1% + 알파 0.2% = 0.3%)
-    min_profit_margin: float = 0.003
+    # 최소 익절 마진 (수수료 0.1% + 알파 0.35% = 0.45%)
+    min_profit_margin: float = 0.0045
 
     # 거래 대금 상위 종목 수
     top_volume_count: int = 10
@@ -130,9 +130,11 @@ class StrategyParams:
     regime_adx_trending_threshold: float = 25.0  # ADX ≥ 이 값이면 추세장
     regime_vol_overload_ratio: float = 2.0       # 변동성 비율 ≥ 이 값이면 변동성 폭발
     regime_lookback_candles: int = 2             # 히스테리시스 룩백 (다수결 캔들 수)
-    # 하이브리드 레짐 오프셋 (레짐 상태별 진입 임계치 가산값)
-    regime_trending_offset: float = 20.0   # 추세장 시 entry_score_threshold에 가산
-    regime_volatile_offset: float = 25.0   # 변동성 폭발 시 entry_score_threshold에 가산
+    # 레짐별 진입 임계값 (절대값, 0~100)
+    # 각 레짐에서 total_score가 이 값 이상이면 BUY 신호 발생
+    entry_threshold_trending: float = 70.0   # 추세장: 추세 방향 진입이 유리하므로 낮은 임계값
+    entry_threshold_ranging: float = 75.0    # 횡보장: 평균 회귀 전략의 기본 임계값
+    entry_threshold_volatile: float = 80.0   # 변동성 폭발: 위험 높으므로 높은 임계값
     regime_min_hold_minutes: int = 20  # 레짐 변경 후 최소 유지 시간 (분) — 플래핑 방지
 
     # 스코어링 가중치 (0.0 = 비활성, 높을수록 비중 큼)
@@ -143,24 +145,23 @@ class StrategyParams:
     w_rsi_slope: float = 1.2        # 과매도 품질 반영 강화
     w_rsi_level: float = 1.3        # 과매도 수준 가장 중요
 
-    # 스코어링 진입 임계치 (0~100, 가중합산 스코어가 이 값 이상이면 BUY)
-    # 기본값 78.0은 15분봉 기준 과최적화를 피하면서 거래 빈도/승률 균형이 가장 안정적이었던
-    # 운영 튜닝값입니다. 레짐 오프셋(+20/+25) 적용 시 실효 임계치는 더 높아질 수 있습니다.
-    entry_score_threshold: float = 78.0
+    # 스코어링 진입 임계치 (레거시 호환용 — 실제 로직은 entry_threshold_* 사용)
+    # from_dict()에서 이전 설정값이 들어올 수 있으므로 필드 유지
+    entry_score_threshold: float = 75.0
     # 매도 청산 스코어링 가중치 (0.0 = 비활성, 높을수록 비중 큼)
-    w_exit_rsi_level: float = 1.0       # RSI 과매수 → 높은 청산 점수
-    w_exit_bb_position: float = 1.0     # BB 상단 접근 → 높은 청산 점수
-    w_exit_profit_pct: float = 1.0      # 수익률 높을수록 → 높은 청산 점수
-    w_exit_adx_trend: float = 1.0       # 강한 추세(ADX 높음) → 추세 전환 경고
+    w_exit_rsi_level: float = 0.9       # RSI 과매수 (보조 시그널)
+    w_exit_bb_position: float = 1.2     # BB 상단 접근 (평균복귀 완료 신호 강화)
+    w_exit_profit_pct: float = 1.4      # 수익률 우선 (손익비 개선 핵심)
+    w_exit_adx_trend: float = 0.8       # 강한 추세 경고 (과민 반응 완화)
 
     # 매도 청산 임계치 (0~100, 가중합산 스코어가 이 값 이상이면 익절)
-    exit_score_threshold: float = 70.0
+    exit_score_threshold: float = 73.0
 
     # 트레일링 스탑 (1차 익절 후 활성화)
-    trailing_stop_atr_multiplier: float = 2.0  # 고점 대비 ATR * N 하락 시 전량 매도
+    trailing_stop_atr_multiplier: float = 2.4  # 고점 대비 ATR * N 하락 시 전량 매도
 
     # 분할 매도 비율 (SELL_HALF 시 매도 비율)
-    take_profit_sell_ratio: float = 0.5
+    take_profit_sell_ratio: float = 0.4
 
     def get_atr_multiplier(self, regime: str = "ranging") -> float:
         """레짐에 따른 ATR 손절 배수를 반환합니다."""
@@ -171,6 +172,14 @@ class StrategyParams:
         elif regime == "volatile":
             return self.atr_stop_multiplier_volatile
         return self.atr_stop_multiplier  # 알 수 없는 레짐 → 기본 폴백
+
+    def get_entry_threshold(self, regime: str = "ranging") -> float:
+        """레짐에 따른 진입 임계값을 반환합니다."""
+        if regime == "trending":
+            return self.entry_threshold_trending
+        elif regime == "volatile":
+            return self.entry_threshold_volatile
+        return self.entry_threshold_ranging  # ranging 또는 알 수 없는 레짐 → 횡보장 기본값
 
     def to_dict(self) -> dict:
         """StrategyParams를 딕셔너리로 변환합니다."""

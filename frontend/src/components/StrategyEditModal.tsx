@@ -60,8 +60,10 @@ export interface StrategyParams {
   // 시장 레짐 설정
   regime_adx_trending_threshold?: number;
   regime_vol_overload_ratio?: number;
-  regime_trending_offset?: number;
-  regime_volatile_offset?: number;
+  // 레짐별 진입 임계값 (절대값)
+  entry_threshold_trending?: number;
+  entry_threshold_ranging?: number;
+  entry_threshold_volatile?: number;
 }
 
 
@@ -351,8 +353,7 @@ export default function StrategyEditModal({
                 </Col>
               </Row>
               <Text style={{ fontSize: 12, opacity: 0.65, display: 'block', marginTop: 8 }}>
-                기본값 78은 운영 튜닝 기준값입니다. 횡보장에서 과도한 진입을 줄이면서도 유효 신호를 놓치지 않도록 맞춘 값이며,
-                추세장/변동성 폭발 구간에서는 레짐 오프셋이 더해져 실효 임계치가 자동으로 높아집니다.
+                횡보장에서의 기본 임계값입니다. 추세장/변동성 폭발 구간에서는 아래 '시장 레짐 설정'에서 별도 임계값을 지정할 수 있습니다.
               </Text>
             </Form.Item>
           </Col>
@@ -530,7 +531,7 @@ export default function StrategyEditModal({
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
-          title="BTC 기준으로 시장 상태를 판단하여 진입 임계치를 동적으로 조정합니다. 추세장/변동성 폭발 시 임계치를 높여 더 확실한 기회만 포착합니다."
+          title="BTC 기준으로 시장 상태를 판단하여 레짐별 진입 임계값을 적용합니다. 각 레짐에서 해당 임계값 이상의 스코어일 때만 매수합니다."
         />
         <Row gutter={16}>
           <Col span={12}>
@@ -551,20 +552,28 @@ export default function StrategyEditModal({
           </Col>
         </Row>
         <Row gutter={16}>
-          <Col span={12}>
-            <Form.Item label="추세장 임계치 가산" name="regime_trending_offset">
-              <InputNumber min={0} max={30} step={1} style={{ width: '100%' }} />
+          <Col span={8}>
+            <Form.Item label="추세장 임계값" name="entry_threshold_trending">
+              <InputNumber min={0} max={100} step={1} style={{ width: '100%' }} />
             </Form.Item>
             <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
-              추세장에서 진입 임계치를 이 값만큼 높입니다. 높을수록 진입이 어려워집니다.
+              추세장에서의 진입 임계값입니다. 추세 방향 진입이 유리하므로 낮게 설정합니다.
             </Text>
           </Col>
-          <Col span={12}>
-            <Form.Item label="변동성 폭발 임계치 가산" name="regime_volatile_offset">
-              <InputNumber min={0} max={30} step={1} style={{ width: '100%' }} />
+          <Col span={8}>
+            <Form.Item label="횡보장 임계값" name="entry_threshold_ranging">
+              <InputNumber min={0} max={100} step={1} style={{ width: '100%' }} />
             </Form.Item>
             <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
-              변동성 폭발 시 진입 임계치를 이 값만큼 높입니다. 높을수록 진입이 어려워집니다.
+              횡보장에서의 기본 임계값입니다. 위 '진입 스코어 임계값'과 동일합니다.
+            </Text>
+          </Col>
+          <Col span={8}>
+            <Form.Item label="변동성 임계값" name="entry_threshold_volatile">
+              <InputNumber min={0} max={100} step={1} style={{ width: '100%' }} />
+            </Form.Item>
+            <Text style={{ fontSize: 12, opacity: 0.65, marginTop: -8, marginBottom: 8, display: 'block' }}>
+              변동성 폭발 시의 진입 임계값입니다. 위험이 높으므로 높게 설정합니다.
             </Text>
           </Col>
         </Row>
