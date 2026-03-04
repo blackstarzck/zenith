@@ -190,7 +190,7 @@ class TestExitSignals:
     def test_high_score_triggers_sell_all(self):
         """1차 익절 후 스코어링 매도 비활성화 → HOLD (트레일링 스탑 대기)."""
         engine = make_engine()
-        snap = make_snapshot(price=52500, bb_upper=52000, atr=500, rsi=75, adx=35)
+        snap = make_snapshot(price=52500, bb_upper=56000, atr=500, rsi=75, adx=35)
         signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000, has_sold_half=True))
         assert signal.signal == Signal.HOLD
         assert "트레일링 스탑 대기" in signal.reason
@@ -229,7 +229,7 @@ class TestExitSignals:
     def test_exit_scoring_above_threshold(self):
         """스코어 >= threshold, has_sold_half=False → SELL_HALF."""
         engine = make_engine()
-        snap = make_snapshot(price=52500, bb_upper=52000, bb_lower=48000, atr=500, rsi=80, adx=35)
+        snap = make_snapshot(price=52500, bb_upper=56000, bb_lower=48000, atr=500, rsi=80, adx=35)
         signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
         assert signal.signal == Signal.SELL_HALF
         assert signal.score is not None
@@ -247,7 +247,7 @@ class TestExitSignals:
     def test_exit_scoring_sell_all_after_half(self):
         """has_sold_half=True → 스코어링 매도 비활성화, HOLD 반환."""
         engine = make_engine()
-        snap = make_snapshot(price=52500, bb_upper=52000, bb_lower=48000, atr=500, rsi=80, adx=35)
+        snap = make_snapshot(price=52500, bb_upper=56000, bb_lower=48000, atr=500, rsi=80, adx=35)
         signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000, has_sold_half=True))
         assert signal.signal == Signal.HOLD
         assert "스코어링 매도 비활성" in signal.reason
@@ -255,7 +255,7 @@ class TestExitSignals:
     def test_trailing_stop_triggers(self):
         """has_sold_half=True, trailing_high 설정, 가격 하락 → SELL_ALL."""
         engine = make_engine(StrategyParams(trailing_stop_atr_multiplier=2.0))
-        snap = make_snapshot(price=53500, atr=500, rsi=50, adx=25)
+        snap = make_snapshot(price=53500, atr=500, rsi=50, adx=25, bb_upper=56000)
         signal = engine.evaluate_exit("KRW-BTC", snap, make_position(
             entry_price=50000, has_sold_half=True, trailing_high=55000
         ))
@@ -265,7 +265,7 @@ class TestExitSignals:
     def test_trailing_stop_inactive_before_half(self):
         """has_sold_half=False → 트레일링 스탑 무시."""
         engine = make_engine(StrategyParams(trailing_stop_atr_multiplier=2.0))
-        snap = make_snapshot(price=53500, atr=500, rsi=50, adx=25)
+        snap = make_snapshot(price=53500, atr=500, rsi=50, adx=25, bb_upper=56000)
         signal = engine.evaluate_exit("KRW-BTC", snap, make_position(
             entry_price=50000, has_sold_half=False, trailing_high=55000
         ))
@@ -278,7 +278,7 @@ class TestExitSignals:
             w_exit_profit_pct=0, w_exit_adx_trend=0,
         )
         engine = make_engine(params)
-        snap = make_snapshot(price=55000, rsi=90, adx=50)
+        snap = make_snapshot(price=55000, rsi=90, adx=50, bb_upper=60000)
         signal = engine.evaluate_exit("KRW-BTC", snap, make_position(entry_price=50000))
         assert signal.signal == Signal.HOLD
         assert signal.score == 0.0

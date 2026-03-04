@@ -216,8 +216,9 @@ class MeanReversionEngine:
 
         우선순위:
         1. [하드 룰] 동적 손절 (ATR 기반) — 무조건 발동
-        2. [하드 룰] 트레일링 스탑 (1차 익절 후 활성)
-        3. [스코어링] 익절 조건 가중합산 평가
+        2. [하드 룰] BB 상단 도달 익절 — 가격 ≥ BB 상단 + 최소 수익 마진 충족 시 즉시 매도
+        3. [하드 룰] 트레일링 스탑 (1차 익절 후 활성)
+        4. [스코어링] 익절 조건 가중합산 평가
 
         Args:
             symbol: 마켓 코드
@@ -247,7 +248,23 @@ class MeanReversionEngine:
                 stop_loss_price=stop_loss_price,
             )
 
-        # ── [하드 룰 2] 트레일링 스탑 (1차 익절 후 활성) ──
+        # ── [하드 룰 2] BB 상단 도달 익절 ──
+        # 가격이 BB 상단 이상이고 최소 수익 마진을 충족하면 즉시 매도
+        if price >= bb.upper and profit_pct >= params.min_profit_margin:
+            signal_type = Signal.SELL_ALL if has_sold_half else Signal.SELL_HALF
+            return TradeSignal(
+                signal=signal_type,
+                symbol=symbol,
+                reason=(
+                    f"BB 상단 도달 익절 "
+                    f"(가격 {price:,.2f} ≥ BB상단 {bb.upper:,.2f}, 수익 {profit_pct:.2%})"
+                ),
+                price=price,
+                stop_loss_price=stop_loss_price,
+                target_price_1=bb.middle if not has_sold_half else None,
+                target_price_2=bb.upper,
+            )
+        # ── [하드 룰 3] 트레일링 스탑 (1차 익절 후 활성) ──
         if has_sold_half and position.trailing_high > 0:
             trailing_multiplier = self._trailing_stop_multiplier(regime, profit_pct)
             trailing_stop = position.trailing_high - (snapshot.atr * trailing_multiplier)

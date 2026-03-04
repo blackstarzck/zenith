@@ -319,14 +319,23 @@ class Orchestrator:
                         "exit_block_reason": exit_block_reason,
                     }
                 else:
-                    # 1차 익절 후 트레일링 대기 상태 (스코어링 비활성)
-                    self._exit_scores[symbol] = {
-                        "exit_score": None,
-                        "exit_status": "trailing",
-                        "exit_threshold_effective": round(exit_threshold_effective, 1),
-                        "exit_decision": "TRAILING",
-                        "exit_block_reason": signal.reason if signal.signal == Signal.HOLD else None,
-                    }
+                    # 스코어 없는 하드 룰 (BB 상단 익절, 손절 등) 또는 1차 익절 후 트레일링 대기
+                    if signal.signal in (Signal.SELL_HALF, Signal.SELL_ALL, Signal.STOP_LOSS):
+                        self._exit_scores[symbol] = {
+                            "exit_score": None,
+                            "exit_status": "hard_rule",
+                            "exit_threshold_effective": round(exit_threshold_effective, 1),
+                            "exit_decision": "SELL",
+                            "exit_block_reason": None,
+                        }
+                    else:
+                        self._exit_scores[symbol] = {
+                            "exit_score": None,
+                            "exit_status": "trailing",
+                            "exit_threshold_effective": round(exit_threshold_effective, 1),
+                            "exit_decision": "TRAILING",
+                            "exit_block_reason": signal.reason if signal.signal == Signal.HOLD else None,
+                        }
 
                 if signal.signal == Signal.STOP_LOSS:
                     self._execute_sell_all(symbol, pos, signal.reason, label="손절 매도")

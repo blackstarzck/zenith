@@ -164,7 +164,9 @@ export const GUIDE_DIAGRAMS: Record<string, { title: string; chart: string }[]> 
     subgraph HARD["하드 룰 (즉시 매도)"]
         M4 --> H1{"ATR 손절\\n현재가 ≤ 진입가 - ATR×레짐배수\\n(횡보2.8/추세2.2/변동2.5)?"}
         H1 -->|"예"| H2["🔴 즉시 전량 매도\\n(STOP_LOSS)"]
-        H1 -->|"아니오"| H3{"트레일링 스탑\\n(반매도 후 활성)\\n현재가 ≤ max(고점-ATR×적응배수, 본전+마진)?"}
+        H1 -->|"아니오"| HBB{"BB 상단 도달?\\n가격 ≥ BB상단\\nAND 수익 ≥ 최소마진(0.45%)?"}
+        HBB -->|"예"| HBB_SELL["🟢 BB 상단 익절\\n(미반매도→SELL_HALF / 반매도→SELL_ALL)"]
+        HBB -->|"아니오"| H3{"트레일링 스탑\\n(반매도 후 활성)\\n현재가 ≤ max(고점-ATR×적응배수, 본전+마진)?"}
         H3 -->|"예"| H4["🔴 잔량 전량 매도\\n(TRAILING_STOP)"]
         H3 -->|"아니오"| H5{"이미 반매도\\n(half_sold)?"}
         H5 -->|"예"| H6["⏳ 홀딩 유지\\n(스코어링 비활성, 트레일링 대기)"]
@@ -186,7 +188,7 @@ export const GUIDE_DIAGRAMS: Record<string, { title: string; chart: string }[]> 
     end
 
     subgraph POST["사후 처리"]
-        H2 & H4 & E10 --> P1["실제 잔고 조회\\nget_balance()"]
+        H2 & H4 & HBB_SELL & E10 --> P1["실제 잔고 조회\\nget_balance()"]
         P1 --> P2["시장가 매도 집행"]
         P2 --> P3["PnL 계산 (수수료 반영)"]
         P3 --> P4["일일 손실 한도 체크\\nrecord_realized_pnl()"]
