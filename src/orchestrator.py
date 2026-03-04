@@ -81,6 +81,9 @@ class Orchestrator:
         # 매도 스코어 임시 저장 (tick 내 2-phase 병합용)
         self._exit_scores: dict[str, dict] = {}
 
+        # 수동 매매 감지: 이전 틱의 업비트 잔고 스냅샷 (currency → volume)
+        self._known_balances: dict[str, float] = {}
+
         # 감성 분석 모듈 (API 키가 설정된 경우에만 활성화)
         self._sentiment_enabled = bool(config.sentiment.groq_api_key and config.sentiment.cryptopanic_api_key)
         if self._sentiment_enabled:
@@ -221,6 +224,9 @@ class Orchestrator:
             )
             self._storage.upsert_bot_state(top_symbols=self._target_symbols)
 
+        # 1.7. 수동 매매 감지 (약 1분마다 — 업비트 잔고 변화 추적)
+        if self._loop_count % _PARAM_RELOAD_INTERVAL == 0:
+            self._detect_manual_trades()
         # 2. 보유 종목 청산 평가
         self._evaluate_exits()
 
@@ -636,6 +642,7 @@ class Orchestrator:
             fee=result.fee,
             reason=signal.reason,
             slippage=slippage_bps,
+            trade_source="bot",
         )
     def _execute_sell_half(self, symbol: str, pos, reason: str) -> None:
         """1차 분할 익절 (50%)을 실행합니다.
@@ -696,6 +703,7 @@ class Orchestrator:
             pnl=pnl,
             remaining_volume=remaining if remaining > 0 else None,
             reason=reason,
+            trade_source="bot",
         )
 
         self._safe_notify("notify_pnl", symbol, result.price, pnl, pnl_pct, reason)
@@ -730,6 +738,7 @@ class Orchestrator:
             pnl=pnl,
             remaining_volume=0.0,
             reason=reason,
+            trade_source="bot",
         )
 
         self._safe_notify("notify_pnl", symbol, result.price, pnl, pnl_pct, reason)
@@ -923,6 +932,7 @@ class Orchestrator:
                     amount=amount,
                     fee=0.0,
                     reason="포지션 동기화 (봇 재시작)",
+                    trade_source="sync",
                 )
             synced += 1
             logger.info(
@@ -932,6 +942,124 @@ class Orchestrator:
         if synced:
             logger.info("기존 보유 종목 %d개 동기화 완료", synced)
 
+    def _detect_manual_trades(self) -> None:
+        """업비트 잔고 변화를 추적하여 수동 매매를 감지합니다.
+
+        이전 틱의 잔고 스냅샷과 현재 잔고를 비교하여:
+        - 새로 생긴 종목 → 수동 매수 기록
+        - 사라진 종목 → 수동 매도 기록
+        - 수량 증가 → 수동 추가 매수 기록
+        - 수량 감소 → 수동 부분 매도 기록
+        """
+        try:
+            balances = self._collector.get_balances()
+        except Exception:
+            logger.debug("수동 매매 감지: 잔고 조회 실패 — 건너뜀")
+            return
+
+        # 현재 잔고 맵 구성 (KRW 제외)
+        current: dict[str, dict] = {}
+        for b in balances:
+            currency = b.get("currency", "")
+            if currency == "KRW":
+                continue
+            vol = float(b.get("balance", 0))
+            avg_price = float(b.get("avg_buy_price", 0))
+            if vol > 0:
+                current[currency] = {"volume": vol, "avg_price": avg_price}
+
+        # 최초 실행 시 스냅샷만 저장 (비교 대상 없음)
+        if not self._known_balances:
+            self._known_balances = {c: d["volume"] for c, d in current.items()}
+            return
+
+        prev = self._known_balances
+
+        # 새로 등장한 종목 또는 수량 증가 → 수동 매수
+        for currency, info in current.items():
+            symbol = f"KRW-{currency}"
+            cur_vol = info["volume"]
+            prev_vol = prev.get(currency, 0.0)
+
+            if prev_vol <= 0 and cur_vol > 0:
+                # 봇이 이번 틱에서 매수한 건인지 확인 (RiskManager에 포지션 있으면 봇 매수)
+                if self._risk and self._risk.get_position(symbol):
+                    continue
+                price = info["avg_price"] or (self._collector.get_current_price(symbol) or 0)
+                amount = cur_vol * price
+                logger.info("[수동 매수 감지] %s | 수량: %f | 가격: %.2f KRW", symbol, cur_vol, price)
+                self._storage.insert_trade(
+                    symbol=symbol, side="bid",
+                    price=price, volume=cur_vol, amount=amount, fee=0.0,
+                    reason="수동 매수 (업비트 직접 거래)",
+                    trade_source="manual",
+                )
+                # RiskManager에도 포지션 등록 (청산 추적 위해)
+                if self._risk and not self._risk.get_position(symbol):
+                    self._risk.add_position(
+                        symbol=symbol, entry_price=price,
+                        volume=cur_vol, amount=amount,
+                    )
+            elif cur_vol > prev_vol * 1.001:  # 0.1% 이상 증가 (부동소수점 오차 방지)
+                # 봇 매수가 아닌 추가 매수 감지
+                added = cur_vol - prev_vol
+                price = info["avg_price"] or (self._collector.get_current_price(symbol) or 0)
+                amount = added * price
+                logger.info("[수동 추가매수 감지] %s | 추가: %f | 가격: %.2f KRW", symbol, added, price)
+                self._storage.insert_trade(
+                    symbol=symbol, side="bid",
+                    price=price, volume=added, amount=amount, fee=0.0,
+                    reason="수동 추가매수 (업비트 직접 거래)",
+                    trade_source="manual",
+                )
+
+        # 사라진 종목 또는 수량 감소 → 수동 매도
+        for currency, prev_vol in prev.items():
+            if prev_vol <= 0:
+                continue
+            symbol = f"KRW-{currency}"
+            cur_info = current.get(currency)
+            cur_vol = cur_info["volume"] if cur_info else 0.0
+
+            if cur_vol < prev_vol * 0.999:  # 0.1% 이상 감소
+                sold = prev_vol - cur_vol
+                price = self._collector.get_current_price(symbol) or 0
+                amount = sold * price
+                is_full_sell = cur_vol <= 0
+
+                # 봇이 이번 틱에서 매도한 건인지 확인 (봇 매도 후 포지션 제거됨)
+                # 봇이 전량 매도하면 remove_position이 호출되므로 포지션 없음 → 이미 봇 기록됨
+                # 하지만 봇 매도 직후 이 함수가 호출될 수 있으므로, 최근 봇 거래와 비교
+                recent = self._storage.get_trades(symbol=symbol, limit=1)
+                if recent:
+                    last_trade = recent[0]
+                    last_source = last_trade.get("trade_source", "bot")
+                    last_side = last_trade.get("side", "")
+                    # 마지막 거래가 봇의 매도이고 5분 이내이면 스킵 (봇 매도 중복 방지)
+                    if last_source == "bot" and last_side == "ask":
+                        from datetime import datetime as _dt
+                        try:
+                            last_time = _dt.fromisoformat(last_trade.get("created_at", "").replace("Z", "+00:00"))
+                            if (datetime.now(timezone.utc) - last_time).total_seconds() < 300:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+
+                label = "수동 전량매도" if is_full_sell else "수동 부분매도"
+                logger.info("[%s 감지] %s | 매도량: %f | 가격: %.2f KRW", label, symbol, sold, price)
+                self._storage.insert_trade(
+                    symbol=symbol, side="ask",
+                    price=price, volume=sold, amount=amount, fee=0.0,
+                    remaining_volume=cur_vol if not is_full_sell else 0.0,
+                    reason=f"{label} (업비트 직접 거래)",
+                    trade_source="manual",
+                )
+                # 전량 매도 시 포지션 제거
+                if is_full_sell and self._risk:
+                    self._risk.remove_position(symbol)
+
+        # 스냅샷 갱신
+        self._known_balances = {c: d["volume"] for c, d in current.items()}
     def _get_total_balance_krw(self) -> float:
         """전체 자산을 KRW 기준으로 환산합니다.
 

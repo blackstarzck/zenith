@@ -180,9 +180,17 @@ const tradeColumns: ColumnsType<Trade> = [
   {
     title: '구분',
     dataIndex: 'side',
-    width: 80,
-    render: (v: string) => (
-      <Tag color={v === 'bid' ? 'red' : 'blue'}>{v === 'bid' ? '매수' : '매도'}</Tag>
+    width: 120,
+    render: (v: string, record: Trade) => (
+      <Flex gap={4} align="center">
+        <Tag color={v === 'bid' ? 'red' : 'blue'}>{v === 'bid' ? '매수' : '매도'}</Tag>
+        {record.trade_source === 'manual' && (
+          <Tag color="orange" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>수동</Tag>
+        )}
+        {record.trade_source === 'sync' && (
+          <Tag color="purple" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>동기화</Tag>
+        )}
+      </Flex>
     ),
   },
   {

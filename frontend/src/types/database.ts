@@ -1,5 +1,7 @@
 /** DB 테이블 타입 정의 — Supabase 스키마와 1:1 매핑 */
 
+export type TradeSource = 'bot' | 'manual' | 'sync';
+
 export interface Trade {
   id: string;
   symbol: string;
@@ -12,6 +14,7 @@ export interface Trade {
   slippage: number | null;  // 예상 슬리피지 (bps), 매도 거래는 null
   remaining_volume: number | null;
   reason: string | null;
+  trade_source: TradeSource | null;  // 거래 출처: bot=자동, manual=수동, sync=동기화
   created_at: string;
 }
 

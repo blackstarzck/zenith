@@ -35,8 +35,18 @@ const positionColumns: ColumnsType<Trade> = [
   {
     title: '종목',
     dataIndex: 'symbol',
-    width: 120,
-    render: (v: string) => <Text strong>{v.replace('KRW-', '')}</Text>,
+    width: 140,
+    render: (v: string, record: Trade) => (
+      <Flex gap={6} align="center">
+        <Text strong>{v.replace('KRW-', '')}</Text>
+        {record.trade_source === 'manual' && (
+          <Tag color="orange" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>수동</Tag>
+        )}
+        {record.trade_source === 'sync' && (
+          <Tag color="purple" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>동기화</Tag>
+        )}
+      </Flex>
+    ),
   },
   {
     title: '매수 가격',
@@ -179,12 +189,20 @@ export default function TradingPage() {
     {
       title: '구분',
       dataIndex: 'side',
-      width: 80,
+      width: 120,
       align: 'center',
-      render: (v: string) => (
-        <Tag color={v === 'bid' ? '#ff4d4f' : '#1890ff'}>
-          {v === 'bid' ? '매수' : '매도'}
-        </Tag>
+      render: (v: string, record: Trade) => (
+        <Flex gap={4} align="center" justify="center">
+          <Tag color={v === 'bid' ? '#ff4d4f' : '#1890ff'}>
+            {v === 'bid' ? '매수' : '매도'}
+          </Tag>
+          {record.trade_source === 'manual' && (
+            <Tag color="orange" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>수동</Tag>
+          )}
+          {record.trade_source === 'sync' && (
+            <Tag color="purple" style={{ margin: 0, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>동기화</Tag>
+          )}
+        </Flex>
       ),
     },
     {

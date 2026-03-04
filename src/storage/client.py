@@ -49,6 +49,7 @@ class StorageClient:
         remaining_volume: float | None = None,
         reason: str | None = None,
         slippage: float | None = None,
+        trade_source: str = "bot",
     ) -> dict[str, Any]:
         """매매 체결 내역을 기록합니다."""
         row = {
@@ -58,6 +59,7 @@ class StorageClient:
             "volume": volume,
             "amount": amount,
             "fee": fee,
+            "trade_source": trade_source,
             "created_at": datetime.utcnow().isoformat(),
         }
         if pnl is not None:
